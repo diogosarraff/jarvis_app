@@ -54,23 +54,28 @@ export default function Home() {
         <h2 style={styles.marketTitle}>🏀 Mercado Vencedor</h2>
 
         {jogos.length > 0 && (
-          <select
-            style={styles.select}
-            value={jogoSelecionado?.id}
-            onChange={(e) => {
-  const jogo = jogos.find(j => j.id === Number(e.target.value))
-  setJogoSelecionado(jogo)
-  setResultado(null)
-  setTimeSelecionado(null)
-}}
-          >
-            {jogos.map((jogo) => (
-              <option key={jogo.id} value={jogo.id}>
-                {jogo.casa} vs {jogo.fora}
-              </option>
-            ))}
-          </select>
-        )}
+  <div style={styles.gamesList}>
+    {jogos.map((jogo) => (
+      <div
+        key={jogo.id}
+        onClick={() => {
+          setJogoSelecionado(jogo)
+          setResultado(null)
+          setTimeSelecionado(null)
+        }}
+        style={{
+          ...styles.gameCard,
+          backgroundColor:
+            jogoSelecionado?.id === jogo.id
+              ? "#ff6b00"
+              : "#2a2f3a",
+        }}
+      >
+        {jogo.casa} vs {jogo.fora}
+      </div>
+    ))}
+  </div>
+)}
 
         {jogoSelecionado && (
           <>
@@ -138,6 +143,20 @@ const styles: any = {
     color: "white",
     padding: "30px",
     fontFamily: "Arial",
+    gamesList: {
+  display: "flex",
+  flexDirection: "column",
+  gap: "10px",
+  marginBottom: "20px",
+},
+
+gameCard: {
+  padding: "12px",
+  borderRadius: "8px",
+  textAlign: "center",
+  cursor: "pointer",
+  transition: "0.2s",
+},
   },
   title: {
     fontSize: "32px",

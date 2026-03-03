@@ -1,13 +1,28 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 export default function Home() {
+  const [jogos, setJogos] = useState<any[]>([])
+  const [jogoSelecionado, setJogoSelecionado] = useState<any>(null)
   const [oddBanca, setOddBanca] = useState("")
   const [resultado, setResultado] = useState<any>(null)
 
+  useEffect(() => {
+    async function buscarJogos() {
+      const res = await fetch("/api/agenda-hoje")
+      const json = await res.json()
+      setJogos(json.data)
+      if (json.data.length > 0) {
+        setJogoSelecionado(json.data[0])
+      }
+    }
+
+    buscarJogos()
+  }, [])
+
   function calcular() {
-    const probJarvis = 0.55 // MOCK por enquanto (55%)
+    const probJarvis = 0.55
     const oddJusta = 1 / probJarvis
     const ev = probJarvis * (Number(oddBanca) - 1) - (1 - probJarvis)
 
@@ -23,6 +38,12 @@ export default function Home() {
     })
   }
 
+  function getFarolColor(farol: string) {
+    if (farol === "verde") return "#00ff88"
+    if (farol === "amarelo") return "#ffaa00"
+    return "#ff3b3b"
+  }
+
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Jarvis</h1>
@@ -31,22 +52,48 @@ export default function Home() {
       <div style={styles.card}>
         <h2 style={styles.marketTitle}>🏀 Mercado Vencedor</h2>
 
-        <div style={styles.row}>
-          <button style={styles.teamButton}>Phoenix Suns</button>
-          <button style={styles.teamButton}>Orlando Magic</button>
-        </div>
+        {jogos.length > 0 && (
+          <select
+            style={styles.select}
+            value={jogoSelecionado?.id}
+            onChange={(e) => {
+              const jogo = jogos.find(j => j.id === Number(e.target.value))
+              setJogoSelecionado(jogo)
+              setResultado(null)
+            }}
+          >
+            {jogos.map((jogo) => (
+              <option key={jogo.id} value={jogo.id}>
+                {jogo.casa} vs {jogo.fora}
+              </option>
+            ))}
+          </select>
+        )}
 
-        <input
-          type="number"
-          placeholder="Digite a odd da banca"
-          value={oddBanca}
-          onChange={(e) => setOddBanca(e.target.value)}
-          style={styles.input}
-        />
+        {jogoSelecionado && (
+          <>
+            <div style={styles.row}>
+              <button style={styles.teamButton}>
+                {jogoSelecionado.casa}
+              </button>
+              <button style={styles.teamButton}>
+                {jogoSelecionado.fora}
+              </button>
+            </div>
 
-        <button style={styles.calcButton} onClick={calcular}>
-          Calcular
-        </button>
+            <input
+              type="number"
+              placeholder="Digite a odd da banca"
+              value={oddBanca}
+              onChange={(e) => setOddBanca(e.target.value)}
+              style={styles.input}
+            />
+
+            <button style={styles.calcButton} onClick={calcular}>
+              Calcular
+            </button>
+          </>
+        )}
 
         {resultado && (
           <div style={styles.resultBox}>
@@ -61,12 +108,6 @@ export default function Home() {
       </div>
     </div>
   )
-}
-
-function getFarolColor(farol: string) {
-  if (farol === "verde") return "#00ff88"
-  if (farol === "amarelo") return "#ffaa00"
-  return "#ff3b3b"
 }
 
 const styles: any = {
@@ -94,6 +135,13 @@ const styles: any = {
   marketTitle: {
     marginBottom: "20px",
   },
+  select: {
+    width: "100%",
+    padding: "10px",
+    marginBottom: "20px",
+    borderRadius: "8px",
+    border: "none",
+  },
   row: {
     display: "flex",
     gap: "10px",
@@ -106,7 +154,6 @@ const styles: any = {
     border: "none",
     backgroundColor: "#2a2f3a",
     color: "white",
-    cursor: "pointer",
   },
   input: {
     width: "100%",
@@ -123,7 +170,6 @@ const styles: any = {
     backgroundColor: "#ff6b00",
     color: "white",
     fontWeight: "bold",
-    cursor: "pointer",
   },
   resultBox: {
     marginTop: "20px",

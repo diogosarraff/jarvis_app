@@ -7,6 +7,7 @@ export default function Home() {
   const [jogoSelecionado, setJogoSelecionado] = useState<any>(null)
   const [oddBanca, setOddBanca] = useState("")
   const [resultado, setResultado] = useState<any>(null)
+  const [timeSelecionado, setTimeSelecionado] = useState<string | null>(null)
 
   useEffect(() => {
     async function buscarJogos() {
@@ -57,10 +58,11 @@ export default function Home() {
             style={styles.select}
             value={jogoSelecionado?.id}
             onChange={(e) => {
-              const jogo = jogos.find(j => j.id === Number(e.target.value))
-              setJogoSelecionado(jogo)
-              setResultado(null)
-            }}
+  const jogo = jogos.find(j => j.id === Number(e.target.value))
+  setJogoSelecionado(jogo)
+  setResultado(null)
+  setTimeSelecionado(null)
+}}
           >
             {jogos.map((jogo) => (
               <option key={jogo.id} value={jogo.id}>
@@ -73,13 +75,32 @@ export default function Home() {
         {jogoSelecionado && (
           <>
             <div style={styles.row}>
-              <button style={styles.teamButton}>
-                {jogoSelecionado.casa}
-              </button>
-              <button style={styles.teamButton}>
-                {jogoSelecionado.fora}
-              </button>
-            </div>
+  <button
+    onClick={() => setTimeSelecionado(jogoSelecionado.casa)}
+    style={{
+      ...styles.teamButton,
+      backgroundColor:
+        timeSelecionado === jogoSelecionado.casa
+          ? "#ff6b00"
+          : "#2a2f3a",
+    }}
+  >
+    {jogoSelecionado.casa}
+  </button>
+
+  <button
+    onClick={() => setTimeSelecionado(jogoSelecionado.fora)}
+    style={{
+      ...styles.teamButton,
+      backgroundColor:
+        timeSelecionado === jogoSelecionado.fora
+          ? "#ff6b00"
+          : "#2a2f3a",
+    }}
+  >
+    {jogoSelecionado.fora}
+  </button>
+</div>
 
             <input
               type="number"

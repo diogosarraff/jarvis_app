@@ -143,11 +143,14 @@ const styles: any = {
     color: "white",
     padding: "30px",
     fontFamily: "Arial",
-    gamesList: {
+   gamesList: {
   display: "flex",
   flexDirection: "column",
-  gap: "10px",
+  gap: "8px",
   marginBottom: "20px",
+  maxHeight: "220px",
+  overflowY: "auto",
+  paddingRight: "4px",
 },
 
 gameCard: {

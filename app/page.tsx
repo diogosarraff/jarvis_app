@@ -14,6 +14,7 @@ export default function Home() {
       const res = await fetch("/api/agenda-hoje")
       const json = await res.json()
       setJogos(json.data)
+
       if (json.data.length > 0) {
         setJogoSelecionado(json.data[0])
       }
@@ -54,58 +55,58 @@ export default function Home() {
         <h2 style={styles.marketTitle}>🏀 Mercado Vencedor</h2>
 
         {jogos.length > 0 && (
-  <div style={styles.gamesList}>
-    {jogos.map((jogo) => (
-      <div
-        key={jogo.id}
-        onClick={() => {
-          setJogoSelecionado(jogo)
-          setResultado(null)
-          setTimeSelecionado(null)
-        }}
-        style={{
-          ...styles.gameCard,
-          backgroundColor:
-            jogoSelecionado?.id === jogo.id
-              ? "#ff6b00"
-              : "#2a2f3a",
-        }}
-      >
-        {jogo.casa} vs {jogo.fora}
-      </div>
-    ))}
-  </div>
-)}
+          <div style={styles.gamesList}>
+            {jogos.map((jogo) => (
+              <div
+                key={jogo.id}
+                onClick={() => {
+                  setJogoSelecionado(jogo)
+                  setResultado(null)
+                  setTimeSelecionado(null)
+                }}
+                style={{
+                  ...styles.gameCard,
+                  backgroundColor:
+                    jogoSelecionado?.id === jogo.id
+                      ? "#ff6b00"
+                      : "#2a2f3a",
+                }}
+              >
+                {jogo.casa} vs {jogo.fora}
+              </div>
+            ))}
+          </div>
+        )}
 
         {jogoSelecionado && (
           <>
             <div style={styles.row}>
-  <button
-    onClick={() => setTimeSelecionado(jogoSelecionado.casa)}
-    style={{
-      ...styles.teamButton,
-      backgroundColor:
-        timeSelecionado === jogoSelecionado.casa
-          ? "#ff6b00"
-          : "#2a2f3a",
-    }}
-  >
-    {jogoSelecionado.casa}
-  </button>
+              <button
+                onClick={() => setTimeSelecionado(jogoSelecionado.casa)}
+                style={{
+                  ...styles.teamButton,
+                  backgroundColor:
+                    timeSelecionado === jogoSelecionado.casa
+                      ? "#ff6b00"
+                      : "#2a2f3a",
+                }}
+              >
+                {jogoSelecionado.casa}
+              </button>
 
-  <button
-    onClick={() => setTimeSelecionado(jogoSelecionado.fora)}
-    style={{
-      ...styles.teamButton,
-      backgroundColor:
-        timeSelecionado === jogoSelecionado.fora
-          ? "#ff6b00"
-          : "#2a2f3a",
-    }}
-  >
-    {jogoSelecionado.fora}
-  </button>
-</div>
+              <button
+                onClick={() => setTimeSelecionado(jogoSelecionado.fora)}
+                style={{
+                  ...styles.teamButton,
+                  backgroundColor:
+                    timeSelecionado === jogoSelecionado.fora
+                      ? "#ff6b00"
+                      : "#2a2f3a",
+                }}
+              >
+                {jogoSelecionado.fora}
+              </button>
+            </div>
 
             <input
               type="number"
@@ -123,7 +124,10 @@ export default function Home() {
 
         {resultado && (
           <div style={styles.resultBox}>
-            <p>Probabilidade Jarvis: {(resultado.probJarvis * 100).toFixed(1)}%</p>
+            <p>
+              Probabilidade Jarvis:{" "}
+              {(resultado.probJarvis * 100).toFixed(1)}%
+            </p>
             <p>Odd Justa: {resultado.oddJusta.toFixed(2)}</p>
             <p>EV: {(resultado.ev * 100).toFixed(2)}%</p>
             <p style={{ color: getFarolColor(resultado.farol) }}>
@@ -143,53 +147,54 @@ const styles: any = {
     color: "white",
     padding: "30px",
     fontFamily: "Arial",
-   gamesList: {
-  display: "flex",
-  flexDirection: "column",
-  gap: "8px",
-  marginBottom: "20px",
-  maxHeight: "220px",
-  overflowY: "auto",
-  paddingRight: "4px",
-},
-
-gameCard: {
-  padding: "12px",
-  borderRadius: "8px",
-  textAlign: "center",
-  cursor: "pointer",
-  transition: "0.2s",
-},
   },
+
   title: {
     fontSize: "32px",
     fontWeight: "bold",
   },
+
   subtitle: {
     marginBottom: "30px",
     color: "#aaa",
   },
+
   card: {
     backgroundColor: "#1a1d24",
     padding: "25px",
     borderRadius: "12px",
     boxShadow: "0 0 20px rgba(0,0,0,0.5)",
   },
+
   marketTitle: {
     marginBottom: "20px",
   },
-  select: {
-    width: "100%",
-    padding: "10px",
+
+  gamesList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
     marginBottom: "20px",
-    borderRadius: "8px",
-    border: "none",
+    maxHeight: "220px",
+    overflowY: "auto",
+    paddingRight: "4px",
   },
+
+  gameCard: {
+    padding: "14px",
+    borderRadius: "10px",
+    textAlign: "center",
+    cursor: "pointer",
+    transition: "0.2s",
+    fontWeight: "500",
+  },
+
   row: {
     display: "flex",
     gap: "10px",
     marginBottom: "15px",
   },
+
   teamButton: {
     flex: 1,
     padding: "12px",
@@ -198,6 +203,7 @@ gameCard: {
     backgroundColor: "#2a2f3a",
     color: "white",
   },
+
   input: {
     width: "100%",
     padding: "12px",
@@ -205,6 +211,7 @@ gameCard: {
     border: "none",
     marginBottom: "15px",
   },
+
   calcButton: {
     width: "100%",
     padding: "14px",
@@ -214,6 +221,7 @@ gameCard: {
     color: "white",
     fontWeight: "bold",
   },
+
   resultBox: {
     marginTop: "20px",
     backgroundColor: "#111",

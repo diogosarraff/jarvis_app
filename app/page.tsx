@@ -40,6 +40,35 @@ export default function Home() {
     })
   }
 
+  async function guardarAposta() {
+    if (!resultado || !jogoSelecionado || !timeSelecionado) return
+
+    const res = await fetch("/api/guardar-aposta", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jogo: `${jogoSelecionado.casa} vs ${jogoSelecionado.fora}`,
+        mercado: "vencedor",
+        selecao: timeSelecionado,
+        odd_banca: Number(oddBanca),
+        prob_jarvis: resultado.probJarvis,
+        odd_justa: resultado.oddJusta,
+        ev: resultado.ev,
+        farol: resultado.farol,
+      }),
+    })
+
+    const json = await res.json()
+
+    if (json.ok) {
+      alert("Aposta salva no Jarvis ✅")
+    } else {
+      alert("Erro ao salvar aposta")
+    }
+  }
+
   function getFarolColor(farol: string) {
     if (farol === "verde") return "#00ff88"
     if (farol === "amarelo") return "#ffaa00"
@@ -130,9 +159,14 @@ export default function Home() {
             </p>
             <p>Odd Justa: {resultado.oddJusta.toFixed(2)}</p>
             <p>EV: {(resultado.ev * 100).toFixed(2)}%</p>
+
             <p style={{ color: getFarolColor(resultado.farol) }}>
               Farol: {resultado.farol.toUpperCase()}
             </p>
+
+            <button style={styles.saveButton} onClick={guardarAposta}>
+              💾 Guardar Aposta
+            </button>
           </div>
         )}
       </div>
@@ -227,5 +261,17 @@ const styles: any = {
     backgroundColor: "#111",
     padding: "15px",
     borderRadius: "8px",
+  },
+
+  saveButton: {
+    width: "100%",
+    marginTop: "15px",
+    padding: "12px",
+    borderRadius: "8px",
+    border: "none",
+    backgroundColor: "#00c853",
+    color: "white",
+    fontWeight: "bold",
+    cursor: "pointer",
   },
 }

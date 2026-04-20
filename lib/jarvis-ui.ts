@@ -41,22 +41,41 @@ export type RankingItem = {
   confianca: number
 }
 
+function normalizeObject(obj: Record<string, any>) {
+  const normalized: Record<string, any> = {}
+
+  for (const key of Object.keys(obj || {})) {
+    normalized[key] = obj[key]
+    normalized[key.toLowerCase()] = obj[key]
+  }
+
+  return normalized
+}
+
 function firstNumber(obj: Record<string, any>, candidates: string[]): number | null {
+  const row = normalizeObject(obj)
+
   for (const c of candidates) {
-    if (obj[c] !== undefined && obj[c] !== null && obj[c] !== "") {
-      const n = Number(obj[c])
+    const key = c.toLowerCase()
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      const n = Number(row[key])
       if (!Number.isNaN(n)) return n
     }
   }
+
   return null
 }
 
 function firstString(obj: Record<string, any>, candidates: string[]): string | null {
+  const row = normalizeObject(obj)
+
   for (const c of candidates) {
-    if (obj[c] !== undefined && obj[c] !== null && obj[c] !== "") {
-      return String(obj[c])
+    const key = c.toLowerCase()
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return String(row[key])
     }
   }
+
   return null
 }
 
@@ -67,6 +86,11 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
     "home_win_prob",
     "probabilidade_casa",
     "prob_vitoria_casa",
+    "prob_casa_modelo",
+    "prob_home_model",
+    "probability_home",
+    "casa_prob",
+    "home_probability",
   ])
 
   const probFora = firstNumber(row, [
@@ -75,12 +99,14 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
     "away_win_prob",
     "probabilidade_fora",
     "prob_vitoria_fora",
+    "prob_fora_modelo",
+    "prob_away_model",
+    "probability_away",
+    "fora_prob",
+    "away_probability",
   ])
 
-  return {
-    probCasa,
-    probFora,
-  }
+  return { probCasa, probFora }
 }
 
 export function getProjectionFromGameTotal(row: ResultadoJogo) {
@@ -91,6 +117,13 @@ export function getProjectionFromGameTotal(row: ResultadoJogo) {
     "total_pred",
     "total_points_pred",
     "previsao_total",
+    "linha_projetada",
+    "valor_previsto",
+    "predicao",
+    "prediction",
+    "projection",
+    "projecao",
+    "y_pred",
   ])
 }
 
@@ -101,6 +134,13 @@ export function getProjectionFromGameHandicap(row: ResultadoJogo) {
     "prediction_handicap",
     "handicap_pred",
     "previsao_handicap",
+    "spread_pred",
+    "valor_previsto",
+    "predicao",
+    "prediction",
+    "projection",
+    "projecao",
+    "y_pred",
   ])
 }
 
@@ -113,6 +153,15 @@ export function getProjectionFromPlayer(row: ResultadoJogador) {
     "projecao",
     "y_pred",
     "valor_previsto",
+    "predicted_value",
+    "prediction_value",
+    "media_prevista",
+    "linha_projetada",
+    "estimativa",
+    "forecast",
+    "player_prediction",
+    "target_pred",
+    "previsao",
   ])
 }
 
@@ -123,25 +172,37 @@ export function getMinutesAverage(row: ResultadoJogador) {
     "media_minutos",
     "player_minutes_last5",
     "minutes_l5",
+    "minutes_avg_l5",
+    "media_minutos_l5",
+    "min_avg",
+    "avg_minutes",
   ])
 }
 
 export function getPlayerTeam(row: ResultadoJogador) {
-  return firstString(row, [
-    "team_abbr",
-    "team",
-    "time",
-    "team_code",
-  ]) || "-"
+  return (
+    firstString(row, [
+      "team_abbr",
+      "team",
+      "time",
+      "team_code",
+      "team_abbreviation",
+      "team_name_short",
+    ]) || "-"
+  )
 }
 
 export function getPlayerOpponent(row: ResultadoJogador) {
-  return firstString(row, [
-    "opponent_team_abbr",
-    "opponent",
-    "adversario",
-    "opp_team",
-  ]) || "-"
+  return (
+    firstString(row, [
+      "opponent_team_abbr",
+      "opponent",
+      "adversario",
+      "opp_team",
+      "opponent_abbr",
+      "opp_abbr",
+    ]) || "-"
+  )
 }
 
 export function getWinnerBetRankingItem(params: {
@@ -166,9 +227,9 @@ export function getWinnerBetRankingItem(params: {
       odd: odds.oddHome,
       prob: probCasa,
       projecao: null,
-      edge: probCasa - (1 / odds.oddHome),
+      edge: probCasa - 1 / odds.oddHome,
       ev,
-      confianca: Math.round(Math.abs(ev) * 1000) / 10,
+      confianca: Math.round(Math.max(ev, 0) * 1000) / 10,
     })
   }
 
@@ -184,9 +245,9 @@ export function getWinnerBetRankingItem(params: {
       odd: odds.oddAway,
       prob: probFora,
       projecao: null,
-      edge: probFora - (1 / odds.oddAway),
+      edge: probFora - 1 / odds.oddAway,
       ev,
-      confianca: Math.round(Math.abs(ev) * 1000) / 10,
+      confianca: Math.round(Math.max(ev, 0) * 1000) / 10,
     })
   }
 
@@ -204,6 +265,7 @@ export function getLineBetRankingItem(params: {
   oddUnder?: number
 }): RankingItem[] {
   const { keyBase, mercado, titulo, subtitulo, projecao, linha, oddOver, oddUnder } = params
+
   if (projecao === null || linha === undefined || linha === null) return []
 
   const edgeOver = projecao - linha
@@ -212,19 +274,26 @@ export function getLineBetRankingItem(params: {
   const items: RankingItem[] = []
 
   if (oddOver) {
-    const probModelOver = 0.5 + Math.min(Math.abs(edgeOver) / Math.max(linha || 1, 1), 0.25)
-    const ev = (edgeOver > 0 ? probModelOver : 1 - probModelOver) * oddOver - 1
+    const probOver = 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25)
+    const probModel = edgeOver >= 0 ? probOver : 1 - probOver
+    const ev = probModel * oddOver - 1
 
     items.push({
       key: `${keyBase}-over`,
-      categoria: mercado === "Pontos" || mercado === "Assistências" || mercado === "Rebotes" || mercado === "Cestas de 3" ? "Jogador" : "Jogo",
+      categoria:
+        mercado === "Pontos" ||
+        mercado === "Assistências" ||
+        mercado === "Rebotes" ||
+        mercado === "Cestas de 3"
+          ? "Jogador"
+          : "Jogo",
       mercado,
       titulo,
       subtitulo,
       lado: "Over",
       linha,
       odd: oddOver,
-      prob: edgeOver > 0 ? probModelOver : 1 - probModelOver,
+      prob: probModel,
       projecao,
       edge: edgeOver,
       ev,
@@ -233,19 +302,26 @@ export function getLineBetRankingItem(params: {
   }
 
   if (oddUnder) {
-    const probModelUnder = 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(linha || 1, 1), 0.25)
-    const ev = (edgeUnder > 0 ? probModelUnder : 1 - probModelUnder) * oddUnder - 1
+    const probUnder = 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25)
+    const probModel = edgeUnder >= 0 ? probUnder : 1 - probUnder
+    const ev = probModel * oddUnder - 1
 
     items.push({
       key: `${keyBase}-under`,
-      categoria: mercado === "Pontos" || mercado === "Assistências" || mercado === "Rebotes" || mercado === "Cestas de 3" ? "Jogador" : "Jogo",
+      categoria:
+        mercado === "Pontos" ||
+        mercado === "Assistências" ||
+        mercado === "Rebotes" ||
+        mercado === "Cestas de 3"
+          ? "Jogador"
+          : "Jogo",
       mercado,
       titulo,
       subtitulo,
       lado: "Under",
       linha,
       odd: oddUnder,
-      prob: edgeUnder > 0 ? probModelUnder : 1 - probModelUnder,
+      prob: probModel,
       projecao,
       edge: edgeUnder,
       ev,

@@ -14,8 +14,8 @@ import {
   getPlayerTeam,
   getProjectionFromGameHandicap,
   getProjectionFromGameTotal,
-  getProjectionFromPlayer,
   getProjectionFromGameWinner,
+  getProjectionFromPlayer,
   getWinnerBetRankingItem,
 } from "../lib/jarvis-ui"
 
@@ -158,6 +158,7 @@ export default function Home() {
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
+            modelConfidence: total.model_confidence ?? null,
           })
         )
       }
@@ -174,6 +175,7 @@ export default function Home() {
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
+            modelConfidence: handicap.model_confidence ?? null,
           })
         )
       }
@@ -204,6 +206,7 @@ export default function Home() {
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
+            modelConfidence: row.model_confidence ?? null,
           })
         )
       }
@@ -461,65 +464,65 @@ export default function Home() {
             {playersForSelectedGame.length === 0 ? (
               <p style={styles.emptyText}>Nenhum jogador encontrado para esse filtro.</p>
             ) : (
-              <div style={styles.cardsList}>
+              <div style={styles.cardsListCompact}>
                 {playersForSelectedGame.map((player) => {
                   const key = `player-${PLAYER_LABELS[activePlayerMarket]}-${player.game_id}-${player.player_id}`
 
                   return (
-                    <div key={key} style={styles.playerCard}>
-                      <div style={styles.playerHeader}>
-                        <div style={styles.playerName}>
-                          {player.player_name} ({getPlayerTeam(player)})
+                    <div key={key} style={styles.playerCardCompact}>
+                      <div style={styles.playerTopRow}>
+                        <div>
+                          <div style={styles.playerNameCompact}>
+                            {player.player_name} ({getPlayerTeam(player)})
+                          </div>
+                          <div style={styles.playerSublineCompact}>
+                            vs {getPlayerOpponent(player)}
+                          </div>
                         </div>
                       </div>
 
-                      <div style={styles.dataRow}>
-                        <div style={styles.dataLabel}>Adversário</div>
-                        <div style={styles.dataValue}>{getPlayerOpponent(player)}</div>
-                      </div>
-
-                      <div style={styles.metricsRow}>
-                        <div style={styles.metricBox}>
-                          <div style={styles.metricLabel}>Projeção Jarvis</div>
-                          <div style={styles.metricValue}>
+                      <div style={styles.metricsRowCompact}>
+                        <div style={styles.metricMiniBox}>
+                          <div style={styles.metricMiniLabel}>Proj.</div>
+                          <div style={styles.metricMiniValue}>
                             {formatNum(getProjectionFromPlayer(player), 1)}
                           </div>
                         </div>
 
-                        <div style={styles.metricBox}>
-                          <div style={styles.metricLabel}>Média de minutos</div>
-                          <div style={styles.metricValue}>
+                        <div style={styles.metricMiniBox}>
+                          <div style={styles.metricMiniLabel}>Min.</div>
+                          <div style={styles.metricMiniValue}>
                             {formatNum(getMinutesAverage(player), 1)}
                           </div>
                         </div>
                       </div>
 
-                      <div style={styles.oddsGridThree}>
+                      <div style={styles.oddsGridCompact}>
                         <input
                           type="number"
                           step="0.5"
-                          placeholder="Linha da banca"
+                          placeholder="Linha"
                           value={oddsMap[key]?.linha ?? ""}
                           onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
-                          style={styles.input}
+                          style={styles.inputCompact}
                         />
 
                         <input
                           type="number"
                           step="0.01"
-                          placeholder="Odd Over"
+                          placeholder="Over"
                           value={oddsMap[key]?.oddOver ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                          style={styles.input}
+                          style={styles.inputCompact}
                         />
 
                         <input
                           type="number"
                           step="0.01"
-                          placeholder="Odd Under"
+                          placeholder="Under"
                           value={oddsMap[key]?.oddUnder ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                          style={styles.input}
+                          style={styles.inputCompact}
                         />
                       </div>
                     </div>
@@ -596,7 +599,9 @@ export default function Home() {
 
                     <div style={styles.metricBox}>
                       <div style={styles.metricLabel}>EV</div>
-                      <div style={styles.metricValue}>{formatNum(item.ev !== null ? item.ev * 100 : null, 1)}%</div>
+                      <div style={styles.metricValue}>
+                        {formatNum(item.ev !== null ? item.ev * 100 : null, 1)}%
+                      </div>
                     </div>
 
                     <div style={styles.metricBox}>
@@ -783,5 +788,69 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     color: "white",
     backgroundColor: "#2a2f3a",
+  },
+
+  cardsListCompact: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    marginTop: 14,
+  },
+  playerCardCompact: {
+    backgroundColor: "#11161d",
+    borderRadius: 12,
+    padding: 12,
+  },
+  playerTopRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 10,
+  },
+  playerNameCompact: {
+    fontSize: 16,
+    fontWeight: 700,
+    lineHeight: 1.2,
+  },
+  playerSublineCompact: {
+    fontSize: 12,
+    color: "#9aa4b2",
+    marginTop: 4,
+  },
+  metricsRowCompact: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 8,
+    marginBottom: 10,
+  },
+  metricMiniBox: {
+    backgroundColor: "#1f2530",
+    borderRadius: 10,
+    padding: 10,
+  },
+  metricMiniLabel: {
+    fontSize: 11,
+    color: "#9aa4b2",
+    marginBottom: 3,
+  },
+  metricMiniValue: {
+    fontSize: 16,
+    fontWeight: 700,
+  },
+  oddsGridCompact: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 8,
+  },
+  inputCompact: {
+    width: "100%",
+    borderRadius: 10,
+    border: "1px solid #2f3642",
+    backgroundColor: "#1f2530",
+    color: "white",
+    padding: "10px 8px",
+    fontSize: 13,
+    outline: "none",
   },
 }

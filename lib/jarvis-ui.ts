@@ -57,8 +57,10 @@ function firstNumber(obj: Record<string, any>, candidates: string[]): number | n
 
   for (const c of candidates) {
     const key = c.toLowerCase()
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      const n = Number(row[key])
+    const value = row[key]
+
+    if (value !== undefined && value !== null && value !== "") {
+      const n = Number(value)
       if (!Number.isNaN(n)) return n
     }
   }
@@ -71,8 +73,10 @@ function firstString(obj: Record<string, any>, candidates: string[]): string | n
 
   for (const c of candidates) {
     const key = c.toLowerCase()
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return String(row[key])
+    const value = row[key]
+
+    if (value !== undefined && value !== null && value !== "") {
+      return String(value)
     }
   }
 
@@ -81,87 +85,63 @@ function firstString(obj: Record<string, any>, candidates: string[]): string | n
 
 export function getProjectionFromGameWinner(row: ResultadoJogo) {
   const probCasa = firstNumber(row, [
+    "predicted_home_win_prob",
+    "predicted_home_probability",
+    "home_win_prob",
     "prob_casa",
     "prob_home",
-    "home_win_prob",
     "probabilidade_casa",
-    "prob_vitoria_casa",
-    "prob_casa_modelo",
-    "prob_home_model",
-    "probability_home",
-    "casa_prob",
-    "home_probability",
   ])
 
-  const probFora = firstNumber(row, [
+  let probFora = firstNumber(row, [
+    "predicted_away_win_prob",
+    "predicted_away_probability",
+    "away_win_prob",
     "prob_fora",
     "prob_away",
-    "away_win_prob",
     "probabilidade_fora",
-    "prob_vitoria_fora",
-    "prob_fora_modelo",
-    "prob_away_model",
-    "probability_away",
-    "fora_prob",
-    "away_probability",
   ])
+
+  if (probCasa !== null && probFora === null) {
+    probFora = 1 - probCasa
+  }
 
   return { probCasa, probFora }
 }
 
 export function getProjectionFromGameTotal(row: ResultadoJogo) {
   return firstNumber(row, [
-    "pred_total",
+    "predicted_total_points",
+    "predicted_total",
     "projecao_total",
     "prediction_total",
     "total_pred",
     "total_points_pred",
-    "previsao_total",
-    "linha_projetada",
-    "valor_previsto",
-    "predicao",
-    "prediction",
-    "projection",
-    "projecao",
-    "y_pred",
   ])
 }
 
 export function getProjectionFromGameHandicap(row: ResultadoJogo) {
   return firstNumber(row, [
-    "pred_handicap",
+    "predicted_point_diff",
+    "predicted_handicap",
+    "predicted_spread",
     "projecao_handicap",
     "prediction_handicap",
     "handicap_pred",
-    "previsao_handicap",
-    "spread_pred",
-    "valor_previsto",
-    "predicao",
-    "prediction",
-    "projection",
-    "projecao",
-    "y_pred",
   ])
 }
 
 export function getProjectionFromPlayer(row: ResultadoJogador) {
   return firstNumber(row, [
-    "predicao",
-    "pred",
+    "predicted_player_points",
+    "predicted_player_assists",
+    "predicted_player_rebounds",
+    "predicted_player_threes",
+    "predicted_value",
     "prediction",
     "projection",
     "projecao",
-    "y_pred",
-    "valor_previsto",
-    "predicted_value",
-    "prediction_value",
-    "media_prevista",
-    "linha_projetada",
-    "estimativa",
-    "forecast",
-    "player_prediction",
-    "target_pred",
-    "previsao",
+    "predicao",
   ])
 }
 
@@ -170,12 +150,7 @@ export function getMinutesAverage(row: ResultadoJogador) {
     "player_minutes_avg",
     "minutes_avg",
     "media_minutos",
-    "player_minutes_last5",
     "minutes_l5",
-    "minutes_avg_l5",
-    "media_minutos_l5",
-    "min_avg",
-    "avg_minutes",
   ])
 }
 
@@ -185,9 +160,6 @@ export function getPlayerTeam(row: ResultadoJogador) {
       "team_abbr",
       "team",
       "time",
-      "team_code",
-      "team_abbreviation",
-      "team_name_short",
     ]) || "-"
   )
 }
@@ -198,11 +170,16 @@ export function getPlayerOpponent(row: ResultadoJogador) {
       "opponent_team_abbr",
       "opponent",
       "adversario",
-      "opp_team",
-      "opponent_abbr",
-      "opp_abbr",
     ]) || "-"
   )
+}
+
+export function getModelConfidence(row: Record<string, any>) {
+  return firstNumber(row, [
+    "model_confidence",
+    "confidence",
+    "confianca_modelo",
+  ])
 }
 
 export function getWinnerBetRankingItem(params: {
@@ -212,6 +189,7 @@ export function getWinnerBetRankingItem(params: {
 }): RankingItem[] {
   const { row, jogo, odds } = params
   const { probCasa, probFora } = getProjectionFromGameWinner(row)
+  const modelConfidence = getModelConfidence(row)
 
   const items: RankingItem[] = []
 
@@ -229,7 +207,7 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probCasa - 1 / odds.oddHome,
       ev,
-      confianca: Math.round(Math.max(ev, 0) * 1000) / 10,
+      confianca: Math.round(((Math.max(ev, 0) * 100) + ((modelConfidence ?? 0) * 10)) * 10) / 10,
     })
   }
 
@@ -247,7 +225,7 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probFora - 1 / odds.oddAway,
       ev,
-      confianca: Math.round(Math.max(ev, 0) * 1000) / 10,
+      confianca: Math.round(((Math.max(ev, 0) * 100) + ((modelConfidence ?? 0) * 10)) * 10) / 10,
     })
   }
 
@@ -263,8 +241,19 @@ export function getLineBetRankingItem(params: {
   linha?: number
   oddOver?: number
   oddUnder?: number
+  modelConfidence?: number | null
 }): RankingItem[] {
-  const { keyBase, mercado, titulo, subtitulo, projecao, linha, oddOver, oddUnder } = params
+  const {
+    keyBase,
+    mercado,
+    titulo,
+    subtitulo,
+    projecao,
+    linha,
+    oddOver,
+    oddUnder,
+    modelConfidence,
+  } = params
 
   if (projecao === null || linha === undefined || linha === null) return []
 
@@ -297,7 +286,7 @@ export function getLineBetRankingItem(params: {
       projecao,
       edge: edgeOver,
       ev,
-      confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev, 0) * 100) * 10) / 10,
+      confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev, 0) * 100 + ((modelConfidence ?? 0) * 10)) * 10) / 10,
     })
   }
 
@@ -325,7 +314,7 @@ export function getLineBetRankingItem(params: {
       projecao,
       edge: edgeUnder,
       ev,
-      confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev, 0) * 100) * 10) / 10,
+      confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev, 0) * 100 + ((modelConfidence ?? 0) * 10)) * 10) / 10,
     })
   }
 

@@ -43,43 +43,35 @@ export type RankingItem = {
 
 function normalizeObject(obj: Record<string, any>) {
   const normalized: Record<string, any> = {}
-
   for (const key of Object.keys(obj || {})) {
     normalized[key] = obj[key]
     normalized[key.toLowerCase()] = obj[key]
   }
-
   return normalized
 }
 
 function firstNumber(obj: Record<string, any>, candidates: string[]): number | null {
   const row = normalizeObject(obj)
-
   for (const c of candidates) {
     const key = c.toLowerCase()
     const value = row[key]
-
     if (value !== undefined && value !== null && value !== "") {
       const n = Number(value)
       if (!Number.isNaN(n)) return n
     }
   }
-
   return null
 }
 
 function firstString(obj: Record<string, any>, candidates: string[]): string | null {
   const row = normalizeObject(obj)
-
   for (const c of candidates) {
     const key = c.toLowerCase()
     const value = row[key]
-
     if (value !== undefined && value !== null && value !== "") {
       return String(value)
     }
   }
-
   return null
 }
 
@@ -136,6 +128,7 @@ export function getProjectionFromPlayer(row: ResultadoJogador) {
     "predicted_player_points",
     "predicted_player_assists",
     "predicted_player_rebounds",
+    "predicted_player_fg3m",  // ← adicionado
     "predicted_player_threes",
     "predicted_value",
     "prediction",
@@ -155,31 +148,44 @@ export function getMinutesAverage(row: ResultadoJogador) {
 }
 
 export function getPlayerTeam(row: ResultadoJogador) {
-  return (
-    firstString(row, [
-      "team_abbr",
-      "team",
-      "time",
-    ]) || "-"
-  )
+  return firstString(row, ["team_abbr", "team", "time"]) || "-"
 }
 
 export function getPlayerOpponent(row: ResultadoJogador) {
-  return (
-    firstString(row, [
-      "opponent_team_abbr",
-      "opponent",
-      "adversario",
-    ]) || "-"
-  )
+  return firstString(row, ["opponent_team_abbr", "opponent", "adversario"]) || "-"
 }
 
-export function getModelConfidence(row: Record<string, any>) {
-  return firstNumber(row, [
-    "model_confidence",
-    "confidence",
-    "confianca_modelo",
-  ])
+export function getModelConfidence(row: Record<string, any>): number | null {
+  return firstNumber(row, ["model_confidence", "confidence", "confianca_modelo"])
+}
+
+// ── Leitura de probabilidades e EV do banco ──────────────
+export function getProbOver(row: Record<string, any>): number | null {
+  return firstNumber(row, ["prob_over"])
+}
+
+export function getProbUnder(row: Record<string, any>): number | null {
+  return firstNumber(row, ["prob_under"])
+}
+
+export function getEvOver(row: Record<string, any>): number | null {
+  return firstNumber(row, ["ev_over"])
+}
+
+export function getEvUnder(row: Record<string, any>): number | null {
+  return firstNumber(row, ["ev_under"])
+}
+
+export function getDiffProjecaoLinha(row: Record<string, any>): number | null {
+  return firstNumber(row, ["diff_projecao_linha"])
+}
+
+// ── EV calculado localmente quando prob vem do banco ─────
+// prob já é a probabilidade real do modelo (distribuição normal + MAE)
+// ev = prob * odd - 1
+export function calcularEvLocal(prob: number | null, odd: number | null): number | null {
+  if (prob === null || odd === null) return null
+  return prob * odd - 1
 }
 
 export function getWinnerBetRankingItem(params: {
@@ -189,7 +195,7 @@ export function getWinnerBetRankingItem(params: {
 }): RankingItem[] {
   const { row, jogo, odds } = params
   const { probCasa, probFora } = getProjectionFromGameWinner(row)
-  const modelConfidence = getModelConfidence(row)
+  const modelConfidence = getModelConfidence(row) ?? 0
 
   const items: RankingItem[] = []
 
@@ -207,7 +213,7 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probCasa - 1 / odds.oddHome,
       ev,
-      confianca: Math.round(((Math.max(ev, 0) * 100) + ((modelConfidence ?? 0) * 10)) * 10) / 10,
+      confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
     })
   }
 
@@ -225,7 +231,7 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probFora - 1 / odds.oddAway,
       ev,
-      confianca: Math.round(((Math.max(ev, 0) * 100) + ((modelConfidence ?? 0) * 10)) * 10) / 10,
+      confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
     })
   }
 
@@ -242,6 +248,9 @@ export function getLineBetRankingItem(params: {
   oddOver?: number
   oddUnder?: number
   modelConfidence?: number | null
+  // probabilidades reais vindas do banco (calculadas com MAE do modelo)
+  probOver?: number | null
+  probUnder?: number | null
 }): RankingItem[] {
   const {
     keyBase,
@@ -253,68 +262,75 @@ export function getLineBetRankingItem(params: {
     oddOver,
     oddUnder,
     modelConfidence,
+    probOver,
+    probUnder,
   } = params
 
   if (projecao === null || linha === undefined || linha === null) return []
 
   const edgeOver = projecao - linha
   const edgeUnder = linha - projecao
+  const mc = modelConfidence ?? 0
+
+  const isPlayerMarket = ["Pontos", "Assistências", "Rebotes", "Cestas de 3"].includes(mercado)
+  const categoria: "Jogo" | "Jogador" = isPlayerMarket ? "Jogador" : "Jogo"
 
   const items: RankingItem[] = []
 
   if (oddOver) {
-    const probOver = 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25)
-    const probModel = edgeOver >= 0 ? probOver : 1 - probOver
-    const ev = probModel * oddOver - 1
+    // Usa prob do banco se disponível, senão fallback simples
+    const prob = probOver !== null && probOver !== undefined
+      ? probOver
+      : 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25) * (edgeOver >= 0 ? 1 : -1)
+
+    const ev = calcularEvLocal(prob, oddOver)
 
     items.push({
       key: `${keyBase}-over`,
-      categoria:
-        mercado === "Pontos" ||
-        mercado === "Assistências" ||
-        mercado === "Rebotes" ||
-        mercado === "Cestas de 3"
-          ? "Jogador"
-          : "Jogo",
+      categoria,
       mercado,
       titulo,
       subtitulo,
       lado: "Over",
       linha,
       odd: oddOver,
-      prob: probModel,
+      prob,
       projecao,
       edge: edgeOver,
       ev,
-      confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev, 0) * 100 + ((modelConfidence ?? 0) * 10)) * 10) / 10,
+      confianca: Math.round((
+        Math.abs(edgeOver) * 10 +
+        Math.max(ev ?? 0, 0) * 100 +
+        mc * 0.5
+      ) * 10) / 10,
     })
   }
 
   if (oddUnder) {
-    const probUnder = 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25)
-    const probModel = edgeUnder >= 0 ? probUnder : 1 - probUnder
-    const ev = probModel * oddUnder - 1
+    const prob = probUnder !== null && probUnder !== undefined
+      ? probUnder
+      : 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25) * (edgeUnder >= 0 ? 1 : -1)
+
+    const ev = calcularEvLocal(prob, oddUnder)
 
     items.push({
       key: `${keyBase}-under`,
-      categoria:
-        mercado === "Pontos" ||
-        mercado === "Assistências" ||
-        mercado === "Rebotes" ||
-        mercado === "Cestas de 3"
-          ? "Jogador"
-          : "Jogo",
+      categoria,
       mercado,
       titulo,
       subtitulo,
       lado: "Under",
       linha,
       odd: oddUnder,
-      prob: probModel,
+      prob,
       projecao,
       edge: edgeUnder,
       ev,
-      confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev, 0) * 100 + ((modelConfidence ?? 0) * 10)) * 10) / 10,
+      confianca: Math.round((
+        Math.abs(edgeUnder) * 10 +
+        Math.max(ev ?? 0, 0) * 100 +
+        mc * 0.5
+      ) * 10) / 10,
     })
   }
 

@@ -8,10 +8,16 @@ import {
   RankingItem,
   ResultadoJogo,
   ResultadoJogador,
+  calcularEvLocal,
+  getEvOver,
+  getEvUnder,
   getLineBetRankingItem,
   getMinutesAverage,
+  getModelConfidence,
   getPlayerOpponent,
   getPlayerTeam,
+  getProbOver,
+  getProbUnder,
   getProjectionFromGameHandicap,
   getProjectionFromGameTotal,
   getProjectionFromGameWinner,
@@ -89,9 +95,10 @@ export default function Home() {
     loadData()
   }, [])
 
-  const selectedGame = useMemo(() => {
-    return games.find((g) => g.game_id === selectedGameId) || null
-  }, [games, selectedGameId])
+  const selectedGame = useMemo(
+    () => games.find((g) => g.game_id === selectedGameId) || null,
+    [games, selectedGameId]
+  )
 
   const winnerRow = useMemo(
     () => winnerRows.find((r) => String(r.game_id) === String(selectedGameId)) || null,
@@ -158,7 +165,10 @@ export default function Home() {
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
-            modelConfidence: total.model_confidence ?? null,
+            modelConfidence: getModelConfidence(total),
+            // prob do banco não disponível para mercados de jogo — usa fallback
+            probOver: null,
+            probUnder: null,
           })
         )
       }
@@ -175,7 +185,9 @@ export default function Home() {
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
-            modelConfidence: handicap.model_confidence ?? null,
+            modelConfidence: getModelConfidence(handicap),
+            probOver: null,
+            probUnder: null,
           })
         )
       }
@@ -196,17 +208,24 @@ export default function Home() {
         const key = `player-${source.mercado}-${row.game_id}-${row.player_id}`
         const odds = oddsMap[key] || {}
 
+        // Usa prob_over e prob_under do banco quando disponíveis
+        // Recalcula EV com a odd inserida na interface
+        const probOver = getProbOver(row)
+        const probUnder = getProbUnder(row)
+
         items.push(
           ...getLineBetRankingItem({
             keyBase: key,
             mercado: source.mercado,
-            titulo: `${row.player_name}`,
+            titulo: row.player_name,
             subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
             projecao: getProjectionFromPlayer(row),
             linha: odds.linha,
             oddOver: odds.oddOver,
             oddUnder: odds.oddUnder,
-            modelConfidence: row.model_confidence ?? null,
+            modelConfidence: getModelConfidence(row),
+            probOver,
+            probUnder,
           })
         )
       }
@@ -247,11 +266,24 @@ export default function Home() {
     return Number(n).toFixed(digits)
   }
 
+  function getEvColor(ev: number | null): string {
+    if (ev === null) return "white"
+    if (ev > 0.05) return "#00e5a0"
+    if (ev > 0) return "#ffcc80"
+    return "#ff6b6b"
+  }
+
+  function getConfidenceColor(c: number): string {
+    if (c >= 70) return "#00e5a0"
+    if (c >= 40) return "#ffcc80"
+    return "#9aa4b2"
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>Jarvis NBA</h1>
-        <p style={styles.subtitle}>Versão treinada - central operacional diária</p>
+        <p style={styles.subtitle}>Versão treinada — central operacional diária</p>
       </div>
 
       <div style={styles.sectionCard}>
@@ -285,6 +317,7 @@ export default function Home() {
             <h2 style={styles.sectionTitle}>Mercados de jogos</h2>
 
             <div style={styles.cardsList}>
+              {/* Vencedor */}
               <div style={styles.playerCard}>
                 <div style={styles.playerHeader}>
                   <div style={styles.playerName}>Vencedor</div>
@@ -311,7 +344,6 @@ export default function Home() {
                         }
                         style={styles.input}
                       />
-
                       <input
                         type="number"
                         step="0.01"
@@ -329,6 +361,7 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Total de Pontos */}
               <div style={styles.playerCard}>
                 <div style={styles.playerHeader}>
                   <div style={styles.playerName}>Total de Pontos</div>
@@ -354,7 +387,6 @@ export default function Home() {
                         }
                         style={styles.input}
                       />
-
                       <input
                         type="number"
                         step="0.01"
@@ -365,7 +397,6 @@ export default function Home() {
                         }
                         style={styles.input}
                       />
-
                       <input
                         type="number"
                         step="0.01"
@@ -383,6 +414,7 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Handicap */}
               <div style={styles.playerCard}>
                 <div style={styles.playerHeader}>
                   <div style={styles.playerName}>Handicap</div>
@@ -408,7 +440,6 @@ export default function Home() {
                         }
                         style={styles.input}
                       />
-
                       <input
                         type="number"
                         step="0.01"
@@ -419,7 +450,6 @@ export default function Home() {
                         }
                         style={styles.input}
                       />
-
                       <input
                         type="number"
                         step="0.01"
@@ -439,6 +469,7 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Mercados de jogadores */}
           <div style={styles.sectionCard}>
             <h2 style={styles.sectionTitle}>Mercados de jogadores</h2>
 
@@ -458,7 +489,7 @@ export default function Home() {
             </div>
 
             <div style={styles.filterInfo}>
-              Filtro ativo: apenas jogadores com média de 20 minutos ou mais
+              Filtro ativo: apenas jogadores com média de 20+ minutos
             </div>
 
             {playersForSelectedGame.length === 0 ? (
@@ -467,6 +498,15 @@ export default function Home() {
               <div style={styles.cardsListCompact}>
                 {playersForSelectedGame.map((player) => {
                   const key = `player-${PLAYER_LABELS[activePlayerMarket]}-${player.game_id}-${player.player_id}`
+                  const odds = oddsMap[key] || {}
+                  const projecao = getProjectionFromPlayer(player)
+                  const probOver = getProbOver(player)
+                  const probUnder = getProbUnder(player)
+                  const confianca = getModelConfidence(player)
+
+                  // EV em tempo real com prob do banco + odd digitada
+                  const evOverLocal = calcularEvLocal(probOver, odds.oddOver ?? null)
+                  const evUnderLocal = calcularEvLocal(probUnder, odds.oddUnder ?? null)
 
                   return (
                     <div key={key} style={styles.playerCardCompact}>
@@ -479,13 +519,21 @@ export default function Home() {
                             vs {getPlayerOpponent(player)}
                           </div>
                         </div>
+                        {confianca !== null && (
+                          <div style={{
+                            ...styles.confidenceBadge,
+                            color: getConfidenceColor(confianca),
+                          }}>
+                            {confianca.toFixed(0)}
+                          </div>
+                        )}
                       </div>
 
                       <div style={styles.metricsRowCompact}>
                         <div style={styles.metricMiniBox}>
                           <div style={styles.metricMiniLabel}>Proj.</div>
                           <div style={styles.metricMiniValue}>
-                            {formatNum(getProjectionFromPlayer(player), 1)}
+                            {formatNum(projecao, 1)}
                           </div>
                         </div>
 
@@ -495,6 +543,24 @@ export default function Home() {
                             {formatNum(getMinutesAverage(player), 1)}
                           </div>
                         </div>
+
+                        {probOver !== null && (
+                          <div style={styles.metricMiniBox}>
+                            <div style={styles.metricMiniLabel}>P(Over)</div>
+                            <div style={styles.metricMiniValue}>
+                              {formatProb(probOver)}
+                            </div>
+                          </div>
+                        )}
+
+                        {probUnder !== null && (
+                          <div style={styles.metricMiniBox}>
+                            <div style={styles.metricMiniLabel}>P(Under)</div>
+                            <div style={styles.metricMiniValue}>
+                              {formatProb(probUnder)}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div style={styles.oddsGridCompact}>
@@ -502,29 +568,49 @@ export default function Home() {
                           type="number"
                           step="0.5"
                           placeholder="Linha"
-                          value={oddsMap[key]?.linha ?? ""}
+                          value={odds.linha ?? ""}
                           onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                           style={styles.inputCompact}
                         />
-
                         <input
                           type="number"
                           step="0.01"
                           placeholder="Over"
-                          value={oddsMap[key]?.oddOver ?? ""}
+                          value={odds.oddOver ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
                           style={styles.inputCompact}
                         />
-
                         <input
                           type="number"
                           step="0.01"
                           placeholder="Under"
-                          value={oddsMap[key]?.oddUnder ?? ""}
+                          value={odds.oddUnder ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
                           style={styles.inputCompact}
                         />
                       </div>
+
+                      {/* EV em tempo real */}
+                      {(evOverLocal !== null || evUnderLocal !== null) && (
+                        <div style={styles.evRow}>
+                          {evOverLocal !== null && (
+                            <div style={{
+                              ...styles.evBadge,
+                              color: getEvColor(evOverLocal),
+                            }}>
+                              EV Over: {(evOverLocal * 100).toFixed(1)}%
+                            </div>
+                          )}
+                          {evUnderLocal !== null && (
+                            <div style={{
+                              ...styles.evBadge,
+                              color: getEvColor(evUnderLocal),
+                            }}>
+                              EV Under: {(evUnderLocal * 100).toFixed(1)}%
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -599,14 +685,22 @@ export default function Home() {
 
                     <div style={styles.metricBox}>
                       <div style={styles.metricLabel}>EV</div>
-                      <div style={styles.metricValue}>
+                      <div style={{
+                        ...styles.metricValue,
+                        color: getEvColor(item.ev),
+                      }}>
                         {formatNum(item.ev !== null ? item.ev * 100 : null, 1)}%
                       </div>
                     </div>
 
                     <div style={styles.metricBox}>
                       <div style={styles.metricLabel}>Confiança</div>
-                      <div style={styles.metricValue}>{formatNum(item.confianca, 1)}</div>
+                      <div style={{
+                        ...styles.metricValue,
+                        color: getConfidenceColor(item.confianca),
+                      }}>
+                        {formatNum(item.confianca, 1)}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -765,6 +859,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "12px 10px",
     fontSize: 14,
     outline: "none",
+    boxSizing: "border-box",
   },
   emptyText: {
     marginTop: 14,
@@ -789,7 +884,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "white",
     backgroundColor: "#2a2f3a",
   },
-
   cardsListCompact: {
     display: "flex",
     flexDirection: "column",
@@ -817,6 +911,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#9aa4b2",
     marginTop: 4,
+  },
+  confidenceBadge: {
+    fontSize: 20,
+    fontWeight: 800,
+    minWidth: 40,
+    textAlign: "right",
   },
   metricsRowCompact: {
     display: "grid",
@@ -852,5 +952,19 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 8px",
     fontSize: 13,
     outline: "none",
+    boxSizing: "border-box",
+  },
+  evRow: {
+    display: "flex",
+    gap: 8,
+    marginTop: 10,
+    flexWrap: "wrap",
+  },
+  evBadge: {
+    fontSize: 13,
+    fontWeight: 700,
+    backgroundColor: "#1f2530",
+    borderRadius: 8,
+    padding: "6px 10px",
   },
 }

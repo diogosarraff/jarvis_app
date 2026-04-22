@@ -9,8 +9,6 @@ import {
   ResultadoJogo,
   ResultadoJogador,
   calcularEvLocal,
-  getEvOver,
-  getEvUnder,
   getLineBetRankingItem,
   getMinutesAverage,
   getModelConfidence,
@@ -29,9 +27,15 @@ type MarketKey = "winner" | "total" | "handicap" | "pts" | "ast" | "reb" | "fg3m
 
 const PLAYER_LABELS: Record<Exclude<MarketKey, "winner" | "total" | "handicap">, string> = {
   pts: "Pontos",
-  ast: "Assistências",
+  ast: "Assists",
   reb: "Rebotes",
-  fg3m: "Cestas de 3",
+  fg3m: "3 Pontos",
+}
+
+const MARKET_LABELS: Record<"winner" | "total" | "handicap", string> = {
+  winner: "Vencedor",
+  total: "Total",
+  handicap: "Handicap",
 }
 
 export default function Home() {
@@ -45,15 +49,15 @@ export default function Home() {
   const [playerThreesRows, setPlayerThreesRows] = useState<ResultadoJogador[]>([])
 
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
+  const [activeGameMarket, setActiveGameMarket] = useState<"winner" | "total" | "handicap">("winner")
   const [activePlayerMarket, setActivePlayerMarket] = useState<"pts" | "ast" | "reb" | "fg3m">("pts")
+  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking">("jogos")
   const [loading, setLoading] = useState(true)
   const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
-  const [showRanking, setShowRanking] = useState(false)
 
   useEffect(() => {
     async function loadData() {
       setLoading(true)
-
       const [
         { data: gamesRes },
         { data: winnerRes },
@@ -73,9 +77,7 @@ export default function Home() {
         supabase.from("resultado_player_rebounds").select("*"),
         supabase.from("resultado_player_threes").select("*"),
       ])
-
       const gamesData = (gamesRes || []) as Game[]
-
       setGames(gamesData)
       setWinnerRows((winnerRes || []) as ResultadoJogo[])
       setTotalRows((totalRes || []) as ResultadoJogo[])
@@ -84,14 +86,9 @@ export default function Home() {
       setPlayerAssistsRows((assistsRes || []) as ResultadoJogador[])
       setPlayerReboundsRows((reboundsRes || []) as ResultadoJogador[])
       setPlayerThreesRows((threesRes || []) as ResultadoJogador[])
-
-      if (gamesData.length > 0) {
-        setSelectedGameId(gamesData[0].game_id)
-      }
-
+      if (gamesData.length > 0) setSelectedGameId(gamesData[0].game_id)
       setLoading(false)
     }
-
     loadData()
   }, [])
 
@@ -104,12 +101,10 @@ export default function Home() {
     () => winnerRows.find((r) => String(r.game_id) === String(selectedGameId)) || null,
     [winnerRows, selectedGameId]
   )
-
   const totalRow = useMemo(
     () => totalRows.find((r) => String(r.game_id) === String(selectedGameId)) || null,
     [totalRows, selectedGameId]
   )
-
   const handicapRow = useMemo(
     () => handicapRows.find((r) => String(r.game_id) === String(selectedGameId)) || null,
     [handicapRows, selectedGameId]
@@ -117,591 +112,562 @@ export default function Home() {
 
   const playersForSelectedGame = useMemo(() => {
     if (!selectedGameId) return []
-
     const source =
-      activePlayerMarket === "pts"
-        ? playerPointsRows
-        : activePlayerMarket === "ast"
-        ? playerAssistsRows
-        : activePlayerMarket === "reb"
-        ? playerReboundsRows
-        : playerThreesRows
-
+      activePlayerMarket === "pts" ? playerPointsRows :
+      activePlayerMarket === "ast" ? playerAssistsRows :
+      activePlayerMarket === "reb" ? playerReboundsRows :
+      playerThreesRows
     return source
       .filter((p) => String(p.game_id) === String(selectedGameId))
       .filter((p) => (getMinutesAverage(p) ?? 0) >= 20)
       .sort((a, b) => (getProjectionFromPlayer(b) ?? 0) - (getProjectionFromPlayer(a) ?? 0))
-  }, [
-    selectedGameId,
-    activePlayerMarket,
-    playerPointsRows,
-    playerAssistsRows,
-    playerReboundsRows,
-    playerThreesRows,
-  ])
+  }, [selectedGameId, activePlayerMarket, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
 
   const ranking = useMemo(() => {
     const items: RankingItem[] = []
-
     for (const jogo of games) {
       const winner = winnerRows.find((r) => String(r.game_id) === String(jogo.game_id))
       const total = totalRows.find((r) => String(r.game_id) === String(jogo.game_id))
       const handicap = handicapRows.find((r) => String(r.game_id) === String(jogo.game_id))
-
       if (winner) {
         const odds = oddsMap[`winner-${jogo.game_id}`] || {}
         items.push(...getWinnerBetRankingItem({ row: winner, jogo, odds }))
       }
-
       if (total) {
         const odds = oddsMap[`total-${jogo.game_id}`] || {}
-        items.push(
-          ...getLineBetRankingItem({
-            keyBase: `total-${jogo.game_id}`,
-            mercado: "Total de Pontos",
-            titulo: `${jogo.casa} vs ${jogo.fora}`,
-            subtitulo: "Mercado de jogos",
-            projecao: getProjectionFromGameTotal(total),
-            linha: odds.linha,
-            oddOver: odds.oddOver,
-            oddUnder: odds.oddUnder,
-            modelConfidence: getModelConfidence(total),
-            // prob do banco não disponível para mercados de jogo — usa fallback
-            probOver: null,
-            probUnder: null,
-          })
-        )
+        items.push(...getLineBetRankingItem({
+          keyBase: `total-${jogo.game_id}`,
+          mercado: "Total de Pontos",
+          titulo: `${jogo.casa} vs ${jogo.fora}`,
+          subtitulo: "Mercado de jogos",
+          projecao: getProjectionFromGameTotal(total),
+          linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder,
+          modelConfidence: getModelConfidence(total),
+          probOver: null, probUnder: null,
+        }))
       }
-
       if (handicap) {
         const odds = oddsMap[`handicap-${jogo.game_id}`] || {}
-        items.push(
-          ...getLineBetRankingItem({
-            keyBase: `handicap-${jogo.game_id}`,
-            mercado: "Handicap",
-            titulo: `${jogo.casa} vs ${jogo.fora}`,
-            subtitulo: "Mercado de jogos",
-            projecao: getProjectionFromGameHandicap(handicap),
-            linha: odds.linha,
-            oddOver: odds.oddOver,
-            oddUnder: odds.oddUnder,
-            modelConfidence: getModelConfidence(handicap),
-            probOver: null,
-            probUnder: null,
-          })
-        )
+        items.push(...getLineBetRankingItem({
+          keyBase: `handicap-${jogo.game_id}`,
+          mercado: "Handicap",
+          titulo: `${jogo.casa} vs ${jogo.fora}`,
+          subtitulo: "Mercado de jogos",
+          projecao: getProjectionFromGameHandicap(handicap),
+          linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder,
+          modelConfidence: getModelConfidence(handicap),
+          probOver: null, probUnder: null,
+        }))
       }
     }
-
     const playerSources = [
       { rows: playerPointsRows, mercado: "Pontos" },
       { rows: playerAssistsRows, mercado: "Assistências" },
       { rows: playerReboundsRows, mercado: "Rebotes" },
       { rows: playerThreesRows, mercado: "Cestas de 3" },
     ]
-
     for (const source of playerSources) {
       for (const row of source.rows) {
-        const minutes = getMinutesAverage(row)
-        if ((minutes ?? 0) < 20) continue
-
+        if ((getMinutesAverage(row) ?? 0) < 20) continue
         const key = `player-${source.mercado}-${row.game_id}-${row.player_id}`
         const odds = oddsMap[key] || {}
-
-        // Usa prob_over e prob_under do banco quando disponíveis
-        // Recalcula EV com a odd inserida na interface
-        const probOver = getProbOver(row)
-        const probUnder = getProbUnder(row)
-
-        items.push(
-          ...getLineBetRankingItem({
-            keyBase: key,
-            mercado: source.mercado,
-            titulo: row.player_name,
-            subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
-            projecao: getProjectionFromPlayer(row),
-            linha: odds.linha,
-            oddOver: odds.oddOver,
-            oddUnder: odds.oddUnder,
-            modelConfidence: getModelConfidence(row),
-            probOver,
-            probUnder,
-          })
-        )
+        items.push(...getLineBetRankingItem({
+          keyBase: key,
+          mercado: source.mercado,
+          titulo: row.player_name,
+          subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
+          projecao: getProjectionFromPlayer(row),
+          linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder,
+          modelConfidence: getModelConfidence(row),
+          probOver: getProbOver(row),
+          probUnder: getProbUnder(row),
+        }))
       }
     }
-
-    return items
-      .filter((x) => x.odd && x.ev !== null)
-      .sort((a, b) => (b.ev ?? -999) - (a.ev ?? -999))
-  }, [
-    games,
-    winnerRows,
-    totalRows,
-    handicapRows,
-    playerPointsRows,
-    playerAssistsRows,
-    playerReboundsRows,
-    playerThreesRows,
-    oddsMap,
-  ])
+    return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.ev ?? -999) - (a.ev ?? -999))
+  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
 
   function handleOddsChange(key: string, field: keyof OddsInput, value: string) {
     setOddsMap((prev) => ({
       ...prev,
-      [key]: {
-        ...prev[key],
-        [field]: value === "" ? undefined : Number(value),
-      },
+      [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) },
     }))
   }
 
-  function formatProb(n: number | null | undefined) {
-    if (n === null || n === undefined) return "-"
+  function fp(n: number | null | undefined) {
+    if (n == null) return "—"
     return `${(n * 100).toFixed(1)}%`
   }
-
-  function formatNum(n: number | null | undefined, digits = 2) {
-    if (n === null || n === undefined || Number.isNaN(n)) return "-"
-    return Number(n).toFixed(digits)
+  function fn(n: number | null | undefined, d = 1) {
+    if (n == null || Number.isNaN(n)) return "—"
+    return Number(n).toFixed(d)
   }
-
-  function getEvColor(ev: number | null): string {
-    if (ev === null) return "white"
-    if (ev > 0.05) return "#00e5a0"
-    if (ev > 0) return "#ffcc80"
-    return "#ff6b6b"
+  function evColor(ev: number | null): string {
+    if (ev == null) return "#9aa4b2"
+    if (ev > 0.05) return "#22c55e"
+    if (ev > 0) return "#f59e0b"
+    return "#ef4444"
   }
-
-  function getConfidenceColor(c: number): string {
-    if (c >= 70) return "#00e5a0"
-    if (c >= 40) return "#ffcc80"
+  function confColor(c: number | null): string {
+    if (c == null) return "#9aa4b2"
+    if (c >= 70) return "#22c55e"
+    if (c >= 40) return "#f59e0b"
     return "#9aa4b2"
   }
 
+  const S = styles
+
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Jarvis NBA</h1>
-        <p style={styles.subtitle}>Versão treinada — central operacional diária</p>
+    <div style={S.root}>
+      {/* Header */}
+      <div style={S.header}>
+        <div style={S.headerLeft}>
+          <div style={S.logo}>
+            <span style={S.logoJ}>J</span>
+            <span style={S.logoText}>ARVIS</span>
+          </div>
+          <span style={S.headerBadge}>NBA · AO VIVO</span>
+        </div>
+        <div style={S.headerRight}>
+          <div style={S.dot} />
+          <span style={S.headerSub}>Hoje</span>
+        </div>
       </div>
 
-      <div style={styles.sectionCard}>
-        <h2 style={styles.sectionTitle}>Jogos do dia</h2>
-
-        {loading ? (
-          <p style={styles.emptyText}>Carregando...</p>
-        ) : games.length === 0 ? (
-          <p style={styles.emptyText}>Nenhum jogo encontrado.</p>
-        ) : (
-          <div style={styles.gamesList}>
-            {games.map((game) => (
+      {/* Game selector */}
+      {loading ? (
+        <div style={S.loadingBar}>
+          <div style={S.loadingText}>Carregando dados...</div>
+        </div>
+      ) : (
+        <div style={S.gameSelector}>
+          {games.map((game) => {
+            const active = selectedGameId === game.game_id
+            return (
               <button
                 key={game.game_id}
                 onClick={() => setSelectedGameId(game.game_id)}
-                style={{
-                  ...styles.gameButton,
-                  backgroundColor: selectedGameId === game.game_id ? "#ff6b00" : "#242934",
-                }}
+                style={{ ...S.gameTab, ...(active ? S.gameTabActive : {}) }}
               >
-                {game.casa} vs {game.fora}
+                <span style={S.gameTabHome}>{game.casa}</span>
+                <span style={S.gameTabVs}>vs</span>
+                <span style={S.gameTabAway}>{game.fora}</span>
+                {active && <div style={S.gameTabBar} />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Nav */}
+      <div style={S.nav}>
+        {(["jogos", "jogadores", "ranking"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setActiveSection(s)}
+            style={{ ...S.navBtn, ...(activeSection === s ? S.navBtnActive : {}) }}
+          >
+            {s === "jogos" ? "Jogos" : s === "jogadores" ? "Jogadores" : "Ranking"}
+            {s === "ranking" && ranking.length > 0 && (
+              <span style={S.navBadge}>{ranking.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── JOGOS ── */}
+      {activeSection === "jogos" && selectedGame && (
+        <div style={S.section}>
+          {/* Market tabs */}
+          <div style={S.marketTabs}>
+            {(["winner", "total", "handicap"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setActiveGameMarket(m)}
+                style={{ ...S.marketTab, ...(activeGameMarket === m ? S.marketTabActive : {}) }}
+              >
+                {MARKET_LABELS[m]}
               </button>
             ))}
           </div>
-        )}
-      </div>
 
-      {selectedGame && (
-        <>
-          <div style={styles.sectionCard}>
-            <h2 style={styles.sectionTitle}>Mercados de jogos</h2>
-
-            <div style={styles.cardsList}>
-              {/* Vencedor */}
-              <div style={styles.playerCard}>
-                <div style={styles.playerHeader}>
-                  <div style={styles.playerName}>Vencedor</div>
-                </div>
-
-                {winnerRow ? (
+          {/* Vencedor */}
+          {activeGameMarket === "winner" && (
+            <div style={S.card}>
+              {winnerRow ? (() => {
+                const { probCasa, probFora } = getProjectionFromGameWinner(winnerRow)
+                const conf = getModelConfidence(winnerRow)
+                const key = `winner-${selectedGame.game_id}`
+                const odds = oddsMap[key] || {}
+                const evHome = probCasa != null && odds.oddHome ? probCasa * odds.oddHome - 1 : null
+                const evAway = probFora != null && odds.oddAway ? probFora * odds.oddAway - 1 : null
+                return (
                   <>
-                    <div style={styles.dataRow}>
-                      <div style={styles.dataLabel}>Probabilidade Jarvis</div>
-                      <div style={styles.dataValue}>
-                        {selectedGame.casa}: {formatProb(getProjectionFromGameWinner(winnerRow).probCasa)} |{" "}
-                        {selectedGame.fora}: {formatProb(getProjectionFromGameWinner(winnerRow).probFora)}
-                      </div>
+                    <div style={S.cardHeader}>
+                      <span style={S.cardLabel}>Previsão Jarvis</span>
+                      {conf != null && (
+                        <span style={{ ...S.confBadge, color: confColor(conf) }}>
+                          Confiança {fn(conf, 0)}
+                        </span>
+                      )}
                     </div>
-
-                    <div style={styles.oddsGridTwo}>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder={`Odd ${selectedGame.casa}`}
-                        value={oddsMap[`winner-${selectedGame.game_id}`]?.oddHome ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`winner-${selectedGame.game_id}`, "oddHome", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder={`Odd ${selectedGame.fora}`}
-                        value={oddsMap[`winner-${selectedGame.game_id}`]?.oddAway ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`winner-${selectedGame.game_id}`, "oddAway", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p style={styles.emptyText}>Sem resultado de vencedor para este jogo.</p>
-                )}
-              </div>
-
-              {/* Total de Pontos */}
-              <div style={styles.playerCard}>
-                <div style={styles.playerHeader}>
-                  <div style={styles.playerName}>Total de Pontos</div>
-                </div>
-
-                {totalRow ? (
-                  <>
-                    <div style={styles.dataRow}>
-                      <div style={styles.dataLabel}>Projeção Jarvis</div>
-                      <div style={styles.dataValue}>
-                        {formatNum(getProjectionFromGameTotal(totalRow), 1)}
-                      </div>
-                    </div>
-
-                    <div style={styles.oddsGridThree}>
-                      <input
-                        type="number"
-                        step="0.5"
-                        placeholder="Linha da banca"
-                        value={oddsMap[`total-${selectedGame.game_id}`]?.linha ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`total-${selectedGame.game_id}`, "linha", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Odd Over"
-                        value={oddsMap[`total-${selectedGame.game_id}`]?.oddOver ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`total-${selectedGame.game_id}`, "oddOver", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Odd Under"
-                        value={oddsMap[`total-${selectedGame.game_id}`]?.oddUnder ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`total-${selectedGame.game_id}`, "oddUnder", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p style={styles.emptyText}>Sem resultado de total de pontos para este jogo.</p>
-                )}
-              </div>
-
-              {/* Handicap */}
-              <div style={styles.playerCard}>
-                <div style={styles.playerHeader}>
-                  <div style={styles.playerName}>Handicap</div>
-                </div>
-
-                {handicapRow ? (
-                  <>
-                    <div style={styles.dataRow}>
-                      <div style={styles.dataLabel}>Projeção Jarvis</div>
-                      <div style={styles.dataValue}>
-                        {formatNum(getProjectionFromGameHandicap(handicapRow), 1)}
-                      </div>
-                    </div>
-
-                    <div style={styles.oddsGridThree}>
-                      <input
-                        type="number"
-                        step="0.5"
-                        placeholder="Linha da banca"
-                        value={oddsMap[`handicap-${selectedGame.game_id}`]?.linha ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`handicap-${selectedGame.game_id}`, "linha", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Odd lado 1"
-                        value={oddsMap[`handicap-${selectedGame.game_id}`]?.oddOver ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`handicap-${selectedGame.game_id}`, "oddOver", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Odd lado 2"
-                        value={oddsMap[`handicap-${selectedGame.game_id}`]?.oddUnder ?? ""}
-                        onChange={(e) =>
-                          handleOddsChange(`handicap-${selectedGame.game_id}`, "oddUnder", e.target.value)
-                        }
-                        style={styles.input}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p style={styles.emptyText}>Sem resultado de handicap para este jogo.</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Mercados de jogadores */}
-          <div style={styles.sectionCard}>
-            <h2 style={styles.sectionTitle}>Mercados de jogadores</h2>
-
-            <div style={styles.marketTabs}>
-              {(["pts", "ast", "reb", "fg3m"] as const).map((market) => (
-                <button
-                  key={market}
-                  onClick={() => setActivePlayerMarket(market)}
-                  style={{
-                    ...styles.marketTab,
-                    backgroundColor: activePlayerMarket === market ? "#ff6b00" : "#2a2f3a",
-                  }}
-                >
-                  {PLAYER_LABELS[market]}
-                </button>
-              ))}
-            </div>
-
-            <div style={styles.filterInfo}>
-              Filtro ativo: apenas jogadores com média de 20+ minutos
-            </div>
-
-            {playersForSelectedGame.length === 0 ? (
-              <p style={styles.emptyText}>Nenhum jogador encontrado para esse filtro.</p>
-            ) : (
-              <div style={styles.cardsListCompact}>
-                {playersForSelectedGame.map((player) => {
-                  const key = `player-${PLAYER_LABELS[activePlayerMarket]}-${player.game_id}-${player.player_id}`
-                  const odds = oddsMap[key] || {}
-                  const projecao = getProjectionFromPlayer(player)
-                  const probOver = getProbOver(player)
-                  const probUnder = getProbUnder(player)
-                  const confianca = getModelConfidence(player)
-
-                  // EV em tempo real com prob do banco + odd digitada
-                  const evOverLocal = calcularEvLocal(probOver, odds.oddOver ?? null)
-                  const evUnderLocal = calcularEvLocal(probUnder, odds.oddUnder ?? null)
-
-                  return (
-                    <div key={key} style={styles.playerCardCompact}>
-                      <div style={styles.playerTopRow}>
-                        <div>
-                          <div style={styles.playerNameCompact}>
-                            {player.player_name} ({getPlayerTeam(player)})
-                          </div>
-                          <div style={styles.playerSublineCompact}>
-                            vs {getPlayerOpponent(player)}
-                          </div>
+                    <div style={S.winnerGrid}>
+                      <div style={S.winnerSide}>
+                        <div style={S.winnerTeam}>{selectedGame.casa}</div>
+                        <div style={S.winnerProb}>{fp(probCasa)}</div>
+                        <div style={S.probBar}>
+                          <div style={{ ...S.probFill, width: `${(probCasa ?? 0) * 100}%`, background: "#3b82f6" }} />
                         </div>
-                        {confianca !== null && (
-                          <div style={{
-                            ...styles.confidenceBadge,
-                            color: getConfidenceColor(confianca),
-                          }}>
-                            {confianca.toFixed(0)}
-                          </div>
-                        )}
                       </div>
-
-                      <div style={styles.metricsRowCompact}>
-                        <div style={styles.metricMiniBox}>
-                          <div style={styles.metricMiniLabel}>Proj.</div>
-                          <div style={styles.metricMiniValue}>
-                            {formatNum(projecao, 1)}
-                          </div>
-                        </div>
-
-                        <div style={styles.metricMiniBox}>
-                          <div style={styles.metricMiniLabel}>Min.</div>
-                          <div style={styles.metricMiniValue}>
-                            {formatNum(getMinutesAverage(player), 1)}
-                          </div>
-                        </div>
-
-                        {probOver !== null && (
-                          <div style={styles.metricMiniBox}>
-                            <div style={styles.metricMiniLabel}>P(Over)</div>
-                            <div style={styles.metricMiniValue}>
-                              {formatProb(probOver)}
-                            </div>
-                          </div>
-                        )}
-
-                        {probUnder !== null && (
-                          <div style={styles.metricMiniBox}>
-                            <div style={styles.metricMiniLabel}>P(Under)</div>
-                            <div style={styles.metricMiniValue}>
-                              {formatProb(probUnder)}
-                            </div>
-                          </div>
-                        )}
+                      <div style={S.winnerDivider}>
+                        <span style={S.winnerVs}>VS</span>
                       </div>
-
-                      <div style={styles.oddsGridCompact}>
+                      <div style={S.winnerSide}>
+                        <div style={S.winnerTeam}>{selectedGame.fora}</div>
+                        <div style={S.winnerProb}>{fp(probFora)}</div>
+                        <div style={S.probBar}>
+                          <div style={{ ...S.probFill, width: `${(probFora ?? 0) * 100}%`, background: "#f59e0b", marginLeft: "auto" }} />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={S.oddsRow}>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>{selectedGame.casa}</div>
                         <input
-                          type="number"
-                          step="0.5"
-                          placeholder="Linha"
-                          value={odds.linha ?? ""}
-                          onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
-                          style={styles.inputCompact}
+                          type="number" step="0.01" placeholder="Odd"
+                          value={odds.oddHome ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddHome", e.target.value)}
+                          style={S.oddInput}
                         />
+                        {evHome != null && (
+                          <div style={{ ...S.evTag, color: evColor(evHome) }}>
+                            EV {evHome > 0 ? "+" : ""}{(evHome * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>{selectedGame.fora}</div>
                         <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Over"
+                          type="number" step="0.01" placeholder="Odd"
+                          value={odds.oddAway ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddAway", e.target.value)}
+                          style={S.oddInput}
+                        />
+                        {evAway != null && (
+                          <div style={{ ...S.evTag, color: evColor(evAway) }}>
+                            EV {evAway > 0 ? "+" : ""}{(evAway * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )
+              })() : <div style={S.empty}>Sem dados para este jogo.</div>}
+            </div>
+          )}
+
+          {/* Total */}
+          {activeGameMarket === "total" && (
+            <div style={S.card}>
+              {totalRow ? (() => {
+                const proj = getProjectionFromGameTotal(totalRow)
+                const conf = getModelConfidence(totalRow)
+                const key = `total-${selectedGame.game_id}`
+                const odds = oddsMap[key] || {}
+                const evOver = odds.linha && odds.oddOver && proj != null
+                  ? (() => { const d = proj - odds.linha!; return d > 0 ? (0.5 + Math.min(Math.abs(d)/Math.max(odds.linha!,1), 0.25)) * odds.oddOver! - 1 : (0.5 - Math.min(Math.abs(d)/Math.max(odds.linha!,1), 0.25)) * odds.oddOver! - 1 })()
+                  : null
+                const evUnder = odds.linha && odds.oddUnder && proj != null
+                  ? (() => { const d = odds.linha! - proj; return d > 0 ? (0.5 + Math.min(Math.abs(d)/Math.max(odds.linha!,1), 0.25)) * odds.oddUnder! - 1 : (0.5 - Math.min(Math.abs(d)/Math.max(odds.linha!,1), 0.25)) * odds.oddUnder! - 1 })()
+                  : null
+                return (
+                  <>
+                    <div style={S.cardHeader}>
+                      <span style={S.cardLabel}>Total de Pontos</span>
+                      {conf != null && (
+                        <span style={{ ...S.confBadge, color: confColor(conf) }}>
+                          Conf. {fn(conf, 0)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={S.projCenter}>
+                      <div style={S.projBig}>{fn(proj, 1)}</div>
+                      <div style={S.projSub}>Projeção Jarvis</div>
+                    </div>
+                    <div style={S.lineRow}>
+                      <input
+                        type="number" step="0.5" placeholder="Linha da banca"
+                        value={odds.linha ?? ""}
+                        onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
+                        style={{ ...S.oddInput, flex: 1 }}
+                      />
+                    </div>
+                    <div style={S.oddsRow}>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>Over</div>
+                        <input
+                          type="number" step="0.01" placeholder="Odd"
                           value={odds.oddOver ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                          style={styles.inputCompact}
+                          style={S.oddInput}
                         />
+                        {evOver != null && (
+                          <div style={{ ...S.evTag, color: evColor(evOver) }}>
+                            EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>Under</div>
                         <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Under"
+                          type="number" step="0.01" placeholder="Odd"
                           value={odds.oddUnder ?? ""}
                           onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                          style={styles.inputCompact}
+                          style={S.oddInput}
                         />
+                        {evUnder != null && (
+                          <div style={{ ...S.evTag, color: evColor(evUnder) }}>
+                            EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%
+                          </div>
+                        )}
                       </div>
+                    </div>
+                  </>
+                )
+              })() : <div style={S.empty}>Sem dados para este jogo.</div>}
+            </div>
+          )}
 
-                      {/* EV em tempo real */}
-                      {(evOverLocal !== null || evUnderLocal !== null) && (
-                        <div style={styles.evRow}>
-                          {evOverLocal !== null && (
-                            <div style={{
-                              ...styles.evBadge,
-                              color: getEvColor(evOverLocal),
-                            }}>
-                              EV Over: {(evOverLocal * 100).toFixed(1)}%
-                            </div>
-                          )}
-                          {evUnderLocal !== null && (
-                            <div style={{
-                              ...styles.evBadge,
-                              color: getEvColor(evUnderLocal),
-                            }}>
-                              EV Under: {(evUnderLocal * 100).toFixed(1)}%
-                            </div>
-                          )}
+          {/* Handicap */}
+          {activeGameMarket === "handicap" && (
+            <div style={S.card}>
+              {handicapRow ? (() => {
+                const proj = getProjectionFromGameHandicap(handicapRow)
+                const conf = getModelConfidence(handicapRow)
+                const key = `handicap-${selectedGame.game_id}`
+                const odds = oddsMap[key] || {}
+                const evOver = odds.linha && odds.oddOver && proj != null
+                  ? (() => { const d = proj - odds.linha!; return d > 0 ? (0.5 + Math.min(Math.abs(d)/Math.max(Math.abs(odds.linha!),1), 0.25)) * odds.oddOver! - 1 : (0.5 - Math.min(Math.abs(d)/Math.max(Math.abs(odds.linha!),1), 0.25)) * odds.oddOver! - 1 })()
+                  : null
+                const evUnder = odds.linha && odds.oddUnder && proj != null
+                  ? (() => { const d = odds.linha! - proj; return d > 0 ? (0.5 + Math.min(Math.abs(d)/Math.max(Math.abs(odds.linha!),1), 0.25)) * odds.oddUnder! - 1 : (0.5 - Math.min(Math.abs(d)/Math.max(Math.abs(odds.linha!),1), 0.25)) * odds.oddUnder! - 1 })()
+                  : null
+                const direction = proj != null ? (proj > 0 ? selectedGame.casa : proj < 0 ? selectedGame.fora : "Empate") : "—"
+                return (
+                  <>
+                    <div style={S.cardHeader}>
+                      <span style={S.cardLabel}>Handicap · Spread</span>
+                      {conf != null && (
+                        <span style={{ ...S.confBadge, color: confColor(conf) }}>
+                          Conf. {fn(conf, 0)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={S.projCenter}>
+                      <div style={S.projBig}>{proj != null && proj > 0 ? "+" : ""}{fn(proj, 1)}</div>
+                      <div style={S.projSub}>Favorito: <strong>{direction}</strong></div>
+                    </div>
+                    <div style={S.lineRow}>
+                      <input
+                        type="number" step="0.5" placeholder="Linha da banca"
+                        value={odds.linha ?? ""}
+                        onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
+                        style={{ ...S.oddInput, flex: 1 }}
+                      />
+                    </div>
+                    <div style={S.oddsRow}>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>{selectedGame.casa} -</div>
+                        <input
+                          type="number" step="0.01" placeholder="Odd"
+                          value={odds.oddOver ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
+                          style={S.oddInput}
+                        />
+                        {evOver != null && (
+                          <div style={{ ...S.evTag, color: evColor(evOver) }}>
+                            EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                      <div style={S.oddGroup}>
+                        <div style={S.oddLabel}>{selectedGame.fora} +</div>
+                        <input
+                          type="number" step="0.01" placeholder="Odd"
+                          value={odds.oddUnder ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
+                          style={S.oddInput}
+                        />
+                        {evUnder != null && (
+                          <div style={{ ...S.evTag, color: evColor(evUnder) }}>
+                            EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )
+              })() : <div style={S.empty}>Sem dados para este jogo.</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── JOGADORES ── */}
+      {activeSection === "jogadores" && selectedGame && (
+        <div style={S.section}>
+          <div style={S.playerMarketTabs}>
+            {(["pts", "ast", "reb", "fg3m"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setActivePlayerMarket(m)}
+                style={{ ...S.playerMarketTab, ...(activePlayerMarket === m ? S.playerMarketTabActive : {}) }}
+              >
+                {PLAYER_LABELS[m]}
+              </button>
+            ))}
+          </div>
+
+          <div style={S.filterNote}>
+            Filtro: média ≥ 20 min · {playersForSelectedGame.length} jogadores
+          </div>
+
+          {playersForSelectedGame.length === 0 ? (
+            <div style={S.empty}>Nenhum jogador encontrado.</div>
+          ) : (
+            <div style={S.playerList}>
+              {playersForSelectedGame.map((player) => {
+                const key = `player-${PLAYER_LABELS[activePlayerMarket]}-${player.game_id}-${player.player_id}`
+                const odds = oddsMap[key] || {}
+                const proj = getProjectionFromPlayer(player)
+                const probOver = getProbOver(player)
+                const probUnder = getProbUnder(player)
+                const conf = getModelConfidence(player)
+                const evO = calcularEvLocal(probOver, odds.oddOver ?? null)
+                const evU = calcularEvLocal(probUnder, odds.oddUnder ?? null)
+                const hasEv = evO != null || evU != null
+
+                return (
+                  <div key={key} style={S.playerRow}>
+                    {/* Player info */}
+                    <div style={S.playerInfo}>
+                      <div style={S.playerName}>{player.player_name}</div>
+                      <div style={S.playerMeta}>
+                        <span style={S.playerTeam}>{getPlayerTeam(player)}</span>
+                        <span style={S.playerVs}>vs {getPlayerOpponent(player)}</span>
+                      </div>
+                    </div>
+
+                    {/* Stats row */}
+                    <div style={S.playerStats}>
+                      <div style={S.statPill}>
+                        <span style={S.statLabel}>Proj</span>
+                        <span style={S.statValue}>{fn(proj, 1)}</span>
+                      </div>
+                      <div style={S.statPill}>
+                        <span style={S.statLabel}>Min</span>
+                        <span style={S.statValue}>{fn(getMinutesAverage(player), 0)}</span>
+                      </div>
+                      {probOver != null && (
+                        <div style={S.statPill}>
+                          <span style={S.statLabel}>P↑</span>
+                          <span style={S.statValue}>{fp(probOver)}</span>
+                        </div>
+                      )}
+                      {conf != null && (
+                        <div style={{ ...S.statPill, borderColor: confColor(conf) }}>
+                          <span style={S.statLabel}>Conf</span>
+                          <span style={{ ...S.statValue, color: confColor(conf) }}>{fn(conf, 0)}</span>
                         </div>
                       )}
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
 
-          <div style={styles.sectionCard}>
-            <button style={styles.calcButton} onClick={() => setShowRanking(true)}>
-              Calcular ranking do dia
-            </button>
-          </div>
-        </>
+                    {/* Odds input row */}
+                    <div style={S.playerOddsRow}>
+                      <input
+                        type="number" step="0.5" placeholder="Linha"
+                        value={odds.linha ?? ""}
+                        onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
+                        style={S.playerInput}
+                      />
+                      <div style={S.playerOddGroup}>
+                        <input
+                          type="number" step="0.01" placeholder="Over"
+                          value={odds.oddOver ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
+                          style={S.playerInput}
+                        />
+                        {evO != null && (
+                          <div style={{ ...S.evMini, color: evColor(evO) }}>
+                            {evO > 0 ? "+" : ""}{(evO * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                      <div style={S.playerOddGroup}>
+                        <input
+                          type="number" step="0.01" placeholder="Under"
+                          value={odds.oddUnder ?? ""}
+                          onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
+                          style={S.playerInput}
+                        />
+                        {evU != null && (
+                          <div style={{ ...S.evMini, color: evColor(evU) }}>
+                            {evU > 0 ? "+" : ""}{(evU * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       )}
 
-      {showRanking && (
-        <div style={styles.sectionCard}>
-          <h2 style={styles.sectionTitle}>Ranking das apostas do dia</h2>
-
+      {/* ── RANKING ── */}
+      {activeSection === "ranking" && (
+        <div style={S.section}>
           {ranking.length === 0 ? (
-            <p style={styles.emptyText}>
-              Nenhuma aposta calculada. Preencha pelo menos uma linha e odd da banca.
-            </p>
+            <div style={S.emptyRanking}>
+              <div style={S.emptyIcon}>⚡</div>
+              <div style={S.emptyTitle}>Sem apostas calculadas</div>
+              <div style={S.emptySub}>Preencha linhas e odds nos mercados para ver o ranking.</div>
+            </div>
           ) : (
-            <div style={styles.cardsList}>
-              {ranking.map((item, index) => (
-                <div key={item.key} style={styles.playerCard}>
-                  <div style={styles.playerHeader}>
-                    <div style={styles.playerName}>
-                      #{index + 1} {item.titulo}
+            <div style={S.rankList}>
+              {ranking.map((item, i) => (
+                <div key={item.key} style={S.rankRow}>
+                  <div style={S.rankPos}>#{i + 1}</div>
+                  <div style={S.rankInfo}>
+                    <div style={S.rankTitle}>{item.titulo}</div>
+                    <div style={S.rankMeta}>
+                      <span style={S.rankMercado}>{item.mercado}</span>
+                      <span style={S.rankSub}>{item.subtitulo}</span>
                     </div>
-                    <div style={styles.rankBadge}>
-                      {item.categoria} • {item.mercado}
+                    <div style={S.rankStats}>
+                      <span style={S.rankStat}>
+                        <span style={S.rankStatLabel}>Lado</span> {item.lado}
+                      </span>
+                      <span style={S.rankStat}>
+                        <span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}
+                      </span>
+                      <span style={S.rankStat}>
+                        <span style={S.rankStatLabel}>Proj</span> {fn(item.projecao, 1)}
+                      </span>
+                      <span style={S.rankStat}>
+                        <span style={S.rankStatLabel}>Prob</span> {fp(item.prob)}
+                      </span>
+                      <span style={S.rankStat}>
+                        <span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}
+                      </span>
                     </div>
                   </div>
-
-                  <div style={styles.dataRow}>
-                    <div style={styles.dataLabel}>Contexto</div>
-                    <div style={styles.dataValue}>{item.subtitulo}</div>
-                  </div>
-
-                  <div style={styles.metricsRow}>
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Lado</div>
-                      <div style={styles.metricValue}>{item.lado}</div>
+                  <div style={S.rankEvCol}>
+                    <div style={{ ...S.rankEv, color: evColor(item.ev) }}>
+                      {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
                     </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Linha</div>
-                      <div style={styles.metricValue}>{formatNum(item.linha, 1)}</div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Projeção</div>
-                      <div style={styles.metricValue}>{formatNum(item.projecao, 1)}</div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Probabilidade</div>
-                      <div style={styles.metricValue}>{formatProb(item.prob)}</div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Odd</div>
-                      <div style={styles.metricValue}>{formatNum(item.odd, 2)}</div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Edge</div>
-                      <div style={styles.metricValue}>{formatNum(item.edge, 2)}</div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>EV</div>
-                      <div style={{
-                        ...styles.metricValue,
-                        color: getEvColor(item.ev),
-                      }}>
-                        {formatNum(item.ev !== null ? item.ev * 100 : null, 1)}%
-                      </div>
-                    </div>
-
-                    <div style={styles.metricBox}>
-                      <div style={styles.metricLabel}>Confiança</div>
-                      <div style={{
-                        ...styles.metricValue,
-                        color: getConfidenceColor(item.confianca),
-                      }}>
-                        {formatNum(item.confianca, 1)}
-                      </div>
-                    </div>
+                    <div style={S.rankEvLabel}>EV</div>
                   </div>
                 </div>
               ))}
@@ -713,258 +679,483 @@ export default function Home() {
   )
 }
 
+const C = {
+  bg: "#080c14",
+  surface: "#0e1420",
+  surface2: "#141b26",
+  border: "#1e2a3a",
+  border2: "#243040",
+  text: "#e2e8f0",
+  textMuted: "#64748b",
+  textDim: "#334155",
+  accent: "#3b82f6",
+  accentDim: "#1e3a5f",
+  green: "#22c55e",
+  amber: "#f59e0b",
+  red: "#ef4444",
+  white: "#ffffff",
+}
+
 const styles: Record<string, React.CSSProperties> = {
-  container: {
+  root: {
     minHeight: "100vh",
-    backgroundColor: "#0f1115",
-    color: "white",
-    padding: "20px 16px 40px",
-    fontFamily: "Arial, sans-serif",
+    background: C.bg,
+    color: C.text,
+    fontFamily: "'SF Pro Display', 'Helvetica Neue', sans-serif",
+    fontSize: 14,
+    paddingBottom: 40,
   },
+
+  // Header
   header: {
-    marginBottom: 18,
-  },
-  title: {
-    margin: 0,
-    fontSize: 30,
-    fontWeight: 700,
-  },
-  subtitle: {
-    margin: "6px 0 0",
-    color: "#9aa4b2",
-    fontSize: 14,
-  },
-  sectionCard: {
-    backgroundColor: "#1a1f28",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 700,
-  },
-  gamesList: {
     display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    marginTop: 14,
-  },
-  gameButton: {
-    width: "100%",
-    border: "none",
-    borderRadius: 12,
-    padding: "14px 16px",
-    color: "white",
-    textAlign: "left",
-    cursor: "pointer",
-    fontWeight: 700,
-    fontSize: 15,
-  },
-  marketTabs: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
-    marginTop: 14,
-    marginBottom: 12,
-  },
-  marketTab: {
-    border: "none",
-    borderRadius: 10,
-    padding: "10px 12px",
-    color: "white",
-    cursor: "pointer",
-    fontWeight: 600,
-  },
-  filterInfo: {
-    fontSize: 12,
-    color: "#9aa4b2",
-    marginBottom: 14,
-  },
-  cardsList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-    marginTop: 14,
-  },
-  playerCard: {
-    backgroundColor: "#11161d",
-    borderRadius: 14,
-    padding: 14,
-  },
-  playerHeader: {
-    display: "flex",
-    justifyContent: "space-between",
     alignItems: "center",
-    gap: 10,
-    marginBottom: 12,
-  },
-  playerName: {
-    fontSize: 18,
-    fontWeight: 700,
-  },
-  dataRow: {
-    marginBottom: 10,
-  },
-  dataLabel: {
-    fontSize: 12,
-    color: "#9aa4b2",
-    marginBottom: 4,
-  },
-  dataValue: {
-    fontSize: 14,
-    fontWeight: 600,
-    lineHeight: 1.5,
-  },
-  metricsRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
-    gap: 10,
-    marginTop: 14,
-  },
-  metricBox: {
-    backgroundColor: "#1f2530",
-    borderRadius: 12,
-    padding: 12,
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: "#9aa4b2",
-    marginBottom: 4,
-  },
-  metricValue: {
-    fontSize: 18,
-    fontWeight: 700,
-  },
-  oddsGridThree: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 8,
-    marginTop: 14,
-  },
-  oddsGridTwo: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
-    gap: 8,
-    marginTop: 14,
-  },
-  input: {
-    width: "100%",
-    borderRadius: 10,
-    border: "1px solid #2f3642",
-    backgroundColor: "#1f2530",
-    color: "white",
-    padding: "12px 10px",
-    fontSize: 14,
-    outline: "none",
-    boxSizing: "border-box",
-  },
-  emptyText: {
-    marginTop: 14,
-    color: "#9aa4b2",
-  },
-  calcButton: {
-    width: "100%",
-    border: "none",
-    borderRadius: 12,
-    padding: "14px 16px",
-    backgroundColor: "#ff6b00",
-    color: "white",
-    fontWeight: 700,
-    cursor: "pointer",
-    fontSize: 16,
-  },
-  rankBadge: {
-    borderRadius: 999,
-    padding: "6px 10px",
-    fontSize: 12,
-    fontWeight: 700,
-    color: "white",
-    backgroundColor: "#2a2f3a",
-  },
-  cardsListCompact: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-    marginTop: 14,
-  },
-  playerCardCompact: {
-    backgroundColor: "#11161d",
-    borderRadius: 12,
-    padding: 12,
-  },
-  playerTopRow: {
-    display: "flex",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 10,
-    marginBottom: 10,
+    padding: "14px 16px 12px",
+    borderBottom: `1px solid ${C.border}`,
+    background: C.surface,
   },
-  playerNameCompact: {
-    fontSize: 16,
-    fontWeight: 700,
-    lineHeight: 1.2,
-  },
-  playerSublineCompact: {
-    fontSize: 12,
-    color: "#9aa4b2",
-    marginTop: 4,
-  },
-  confidenceBadge: {
+  headerLeft: { display: "flex", alignItems: "center", gap: 10 },
+  logo: { display: "flex", alignItems: "baseline", gap: 2 },
+  logoJ: {
     fontSize: 20,
     fontWeight: 800,
-    minWidth: 40,
-    textAlign: "right",
+    color: C.accent,
+    letterSpacing: "-0.5px",
   },
-  metricsRowCompact: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
-    gap: 8,
+  logoText: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: C.white,
+    letterSpacing: "2px",
+  },
+  headerBadge: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: C.green,
+    background: "rgba(34,197,94,0.12)",
+    border: "1px solid rgba(34,197,94,0.3)",
+    borderRadius: 4,
+    padding: "2px 6px",
+    letterSpacing: "0.5px",
+  },
+  headerRight: { display: "flex", alignItems: "center", gap: 6 },
+  dot: {
+    width: 6, height: 6,
+    borderRadius: "50%",
+    background: C.green,
+    boxShadow: "0 0 6px #22c55e",
+  },
+  headerSub: { fontSize: 12, color: C.textMuted },
+
+  // Loading
+  loadingBar: {
+    padding: "20px 16px",
+    borderBottom: `1px solid ${C.border}`,
+  },
+  loadingText: { color: C.textMuted, fontSize: 13 },
+
+  // Game selector
+  gameSelector: {
+    display: "flex",
+    borderBottom: `1px solid ${C.border}`,
+    background: C.surface,
+    overflowX: "auto" as any,
+  },
+  gameTab: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    padding: "10px 16px 8px",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    minWidth: 120,
+    color: C.textMuted,
+    transition: "color 0.15s",
+  },
+  gameTabActive: { color: C.white },
+  gameTabHome: { fontSize: 13, fontWeight: 700 },
+  gameTabVs: { fontSize: 10, color: C.textDim },
+  gameTabAway: { fontSize: 13, fontWeight: 700 },
+  gameTabBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    background: C.accent,
+    borderRadius: "2px 2px 0 0",
+  },
+
+  // Nav
+  nav: {
+    display: "flex",
+    background: C.surface,
+    borderBottom: `1px solid ${C.border}`,
+  },
+  navBtn: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    padding: "10px 8px",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: C.textMuted,
+    fontSize: 13,
+    fontWeight: 500,
+    letterSpacing: "0.3px",
+    transition: "color 0.15s",
+  },
+  navBtnActive: { color: C.accent },
+  navBadge: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: C.accent,
+    background: C.accentDim,
+    borderRadius: 10,
+    padding: "1px 5px",
+    minWidth: 16,
+    textAlign: "center" as any,
+  },
+
+  // Section
+  section: { padding: "12px 12px 0" },
+
+  // Market tabs (jogos)
+  marketTabs: {
+    display: "flex",
+    gap: 6,
     marginBottom: 10,
   },
-  metricMiniBox: {
-    backgroundColor: "#1f2530",
-    borderRadius: 10,
-    padding: 10,
+  marketTab: {
+    flex: 1,
+    padding: "8px 4px",
+    background: C.surface2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 8,
+    cursor: "pointer",
+    color: C.textMuted,
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: "0.3px",
+    textAlign: "center" as any,
+    transition: "all 0.15s",
   },
-  metricMiniLabel: {
+  marketTabActive: {
+    background: C.accentDim,
+    border: `1px solid ${C.accent}`,
+    color: C.accent,
+  },
+
+  // Card
+  card: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    padding: "14px 14px 12px",
+    marginBottom: 10,
+  },
+  cardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  cardLabel: {
     fontSize: 11,
-    color: "#9aa4b2",
-    marginBottom: 3,
+    fontWeight: 600,
+    color: C.textMuted,
+    textTransform: "uppercase" as any,
+    letterSpacing: "1px",
   },
-  metricMiniValue: {
-    fontSize: 16,
-    fontWeight: 700,
+  confBadge: {
+    fontSize: 11,
+    fontWeight: 600,
   },
-  oddsGridCompact: {
+
+  // Winner
+  winnerGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
+    gridTemplateColumns: "1fr auto 1fr",
+    gap: 12,
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  winnerSide: { display: "flex", flexDirection: "column" as any, gap: 4 },
+  winnerTeam: { fontSize: 15, fontWeight: 700, color: C.white },
+  winnerProb: { fontSize: 22, fontWeight: 800, color: C.white },
+  winnerDivider: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  winnerVs: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: C.textDim,
+    letterSpacing: "2px",
+  },
+  probBar: {
+    height: 3,
+    background: C.border2,
+    borderRadius: 2,
+    overflow: "hidden",
+    width: "100%",
+  },
+  probFill: {
+    height: "100%",
+    borderRadius: 2,
+    transition: "width 0.3s",
+  },
+
+  // Proj center
+  projCenter: {
+    textAlign: "center" as any,
+    marginBottom: 14,
+    padding: "8px 0",
+  },
+  projBig: {
+    fontSize: 36,
+    fontWeight: 800,
+    color: C.white,
+    letterSpacing: "-1px",
+  },
+  projSub: { fontSize: 12, color: C.textMuted, marginTop: 2 },
+
+  // Line row
+  lineRow: {
+    display: "flex",
+    marginBottom: 10,
+  },
+
+  // Odds
+  oddsRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
     gap: 8,
   },
-  inputCompact: {
-    width: "100%",
-    borderRadius: 10,
-    border: "1px solid #2f3642",
-    backgroundColor: "#1f2530",
-    color: "white",
-    padding: "10px 8px",
-    fontSize: 13,
-    outline: "none",
-    boxSizing: "border-box",
+  oddGroup: {
+    display: "flex",
+    flexDirection: "column" as any,
+    gap: 4,
   },
-  evRow: {
+  oddLabel: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: C.textMuted,
+    textTransform: "uppercase" as any,
+    letterSpacing: "0.8px",
+  },
+  oddInput: {
+    width: "100%",
+    background: C.surface2,
+    border: `1px solid ${C.border2}`,
+    borderRadius: 6,
+    color: C.white,
+    fontSize: 13,
+    padding: "7px 10px",
+    outline: "none",
+    boxSizing: "border-box" as any,
+    fontFamily: "inherit",
+  },
+  evTag: {
+    fontSize: 11,
+    fontWeight: 700,
+  },
+
+  // Player market tabs
+  playerMarketTabs: {
+    display: "flex",
+    gap: 6,
+    marginBottom: 8,
+  },
+  playerMarketTab: {
+    flex: 1,
+    padding: "6px 4px",
+    background: C.surface2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    cursor: "pointer",
+    color: C.textMuted,
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.3px",
+    textAlign: "center" as any,
+    transition: "all 0.15s",
+  },
+  playerMarketTabActive: {
+    background: C.accentDim,
+    border: `1px solid ${C.accent}`,
+    color: C.accent,
+  },
+
+  filterNote: {
+    fontSize: 11,
+    color: C.textDim,
+    marginBottom: 8,
+  },
+
+  // Player list
+  playerList: {
+    display: "flex",
+    flexDirection: "column" as any,
+    gap: 6,
+  },
+  playerRow: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+  },
+  playerInfo: { marginBottom: 8 },
+  playerName: { fontSize: 13, fontWeight: 700, color: C.white, marginBottom: 2 },
+  playerMeta: { display: "flex", gap: 6, alignItems: "center" },
+  playerTeam: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: C.accent,
+    background: C.accentDim,
+    borderRadius: 4,
+    padding: "1px 5px",
+  },
+  playerVs: { fontSize: 10, color: C.textMuted },
+
+  // Player stats
+  playerStats: {
+    display: "flex",
+    gap: 6,
+    flexWrap: "wrap" as any,
+    marginBottom: 8,
+  },
+  statPill: {
+    display: "flex",
+    flexDirection: "column" as any,
+    alignItems: "center",
+    background: C.surface2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: "4px 8px",
+    minWidth: 44,
+  },
+  statLabel: { fontSize: 9, color: C.textMuted, fontWeight: 600, letterSpacing: "0.5px" },
+  statValue: { fontSize: 12, fontWeight: 700, color: C.white },
+
+  // Player odds
+  playerOddsRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 6,
+  },
+  playerOddGroup: {
+    display: "flex",
+    flexDirection: "column" as any,
+    gap: 2,
+  },
+  playerInput: {
+    width: "100%",
+    background: C.surface2,
+    border: `1px solid ${C.border2}`,
+    borderRadius: 5,
+    color: C.white,
+    fontSize: 12,
+    padding: "5px 7px",
+    outline: "none",
+    boxSizing: "border-box" as any,
+    fontFamily: "inherit",
+  },
+  evMini: {
+    fontSize: 10,
+    fontWeight: 700,
+    textAlign: "center" as any,
+  },
+
+  // Ranking
+  rankList: {
+    display: "flex",
+    flexDirection: "column" as any,
+    gap: 6,
+  },
+  rankRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+  },
+  rankPos: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: C.textDim,
+    minWidth: 24,
+    paddingTop: 2,
+  },
+  rankInfo: { flex: 1, minWidth: 0 },
+  rankTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: C.white,
+    marginBottom: 3,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as any,
+  },
+  rankMeta: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6 },
+  rankMercado: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: C.accent,
+    background: C.accentDim,
+    borderRadius: 3,
+    padding: "1px 4px",
+    textTransform: "uppercase" as any,
+    letterSpacing: "0.5px",
+  },
+  rankSub: { fontSize: 10, color: C.textMuted },
+  rankStats: {
     display: "flex",
     gap: 8,
-    marginTop: 10,
-    flexWrap: "wrap",
+    flexWrap: "wrap" as any,
   },
-  evBadge: {
+  rankStat: { fontSize: 11, color: C.textMuted },
+  rankStatLabel: { color: C.textDim, marginRight: 2 },
+  rankEvCol: {
+    display: "flex",
+    flexDirection: "column" as any,
+    alignItems: "flex-end",
+    gap: 2,
+    paddingTop: 2,
+  },
+  rankEv: {
+    fontSize: 16,
+    fontWeight: 800,
+  },
+  rankEvLabel: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: C.textDim,
+    letterSpacing: "1px",
+  },
+
+  // Empty states
+  empty: {
+    padding: "20px 0",
+    color: C.textMuted,
     fontSize: 13,
-    fontWeight: 700,
-    backgroundColor: "#1f2530",
-    borderRadius: 8,
-    padding: "6px 10px",
+    textAlign: "center" as any,
   },
+  emptyRanking: {
+    padding: "48px 20px",
+    textAlign: "center" as any,
+  },
+  emptyIcon: { fontSize: 32, marginBottom: 12 },
+  emptyTitle: { fontSize: 15, fontWeight: 700, color: C.white, marginBottom: 6 },
+  emptySub: { fontSize: 12, color: C.textMuted, lineHeight: 1.6 },
 }

@@ -425,7 +425,17 @@ export default function Home() {
                   ? (() => { const d = proj - odds.linha!; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddOver! - 1 })() : null
                 const evUnder = odds.linha && odds.oddUnder && proj != null
                   ? (() => { const d = odds.linha! - proj; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddUnder! - 1 })() : null
-                const direction = proj != null ? (proj > 0 ? selectedGame.casa : proj < 0 ? selectedGame.fora : "—") : "—"
+
+                // predicted_point_diff = pontos_casa - pontos_fora
+                // proj > 0 → Jarvis projeta vitória do mandante → mandante é favorito (spread negativo)
+                // proj < 0 → Jarvis projeta vitória do visitante → visitante é favorito (spread negativo)
+                const favorito = proj != null ? (proj > 0 ? selectedGame.casa : selectedGame.fora) : "—"
+                const spreadFav = proj != null ? `-${Math.abs(proj).toFixed(1)}` : ""
+                const spreadAz  = proj != null ? `+${Math.abs(proj).toFixed(1)}` : ""
+                // Casa recebe spread negativo se proj > 0 (favorito), positivo se proj < 0 (azarão)
+                const spreadCasa = proj != null ? (proj > 0 ? `-${Math.abs(proj).toFixed(1)}` : `+${Math.abs(proj).toFixed(1)}`) : ""
+                const spreadFora = proj != null ? (proj < 0 ? `-${Math.abs(proj).toFixed(1)}` : `+${Math.abs(proj).toFixed(1)}`) : ""
+
                 return (
                   <>
                     <div style={S.cardHeader}>
@@ -433,8 +443,10 @@ export default function Home() {
                       {conf != null && <span style={{ ...S.confBadge, color: confColor(conf) }}>Conf {fn(conf, 0)}</span>}
                     </div>
                     <div style={S.projCenter}>
-                      <div style={S.projBig}>{proj != null && proj > 0 ? "+" : ""}{fn(proj, 1)}</div>
-                      <div style={S.projSub}>Favorito: <strong style={{ color: C.gold }}>{direction}</strong></div>
+                      <div style={S.projBig}>{spreadFav}</div>
+                      <div style={S.projSub}>
+                        Favorito: <strong style={{ color: C.gold }}>{favorito}</strong>
+                      </div>
                     </div>
                     <div style={S.lineRow}>
                       <input type="number" step="0.5" placeholder="Linha da banca"
@@ -443,14 +455,14 @@ export default function Home() {
                     </div>
                     <div style={S.oddsRow}>
                       <div style={S.oddGroup}>
-                        <div style={S.oddLabel}>{selectedGame.casa} −</div>
+                        <div style={S.oddLabel}>{selectedGame.casa} {spreadCasa}</div>
                         <input type="number" step="0.01" placeholder="Odd"
                           value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
                           style={S.oddInput} />
                         {evOver != null && <div style={{ ...S.evTag, color: evColor(evOver) }}>EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%</div>}
                       </div>
                       <div style={S.oddGroup}>
-                        <div style={S.oddLabel}>{selectedGame.fora} +</div>
+                        <div style={S.oddLabel}>{selectedGame.fora} {spreadFora}</div>
                         <input type="number" step="0.01" placeholder="Odd"
                           value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
                           style={S.oddInput} />

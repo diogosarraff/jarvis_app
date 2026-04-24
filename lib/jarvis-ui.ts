@@ -77,6 +77,7 @@ function firstString(obj: Record<string, any>, candidates: string[]): string | n
 
 export function getProjectionFromGameWinner(row: ResultadoJogo) {
   const probCasa = firstNumber(row, [
+    "prob_home_win",        // ← nome real na tabela resultado_vencedor
     "predicted_home_win_prob",
     "predicted_home_probability",
     "home_win_prob",
@@ -84,6 +85,23 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
     "prob_home",
     "probabilidade_casa",
   ])
+
+  let probFora = firstNumber(row, [
+    "prob_away_win",        // ← nome real na tabela resultado_vencedor
+    "predicted_away_win_prob",
+    "predicted_away_probability",
+    "away_win_prob",
+    "prob_fora",
+    "prob_away",
+    "probabilidade_fora",
+  ])
+
+  if (probCasa !== null && probFora === null) {
+    probFora = 1 - probCasa
+  }
+
+  return { probCasa, probFora }
+}
 
   let probFora = firstNumber(row, [
     "predicted_away_win_prob",

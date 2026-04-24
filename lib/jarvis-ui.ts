@@ -77,7 +77,7 @@ function firstString(obj: Record<string, any>, candidates: string[]): string | n
 
 export function getProjectionFromGameWinner(row: ResultadoJogo) {
   const probCasa = firstNumber(row, [
-    "prob_home_win",        // ← nome real na tabela resultado_vencedor
+    "prob_home_win",
     "predicted_home_win_prob",
     "predicted_home_probability",
     "home_win_prob",
@@ -87,23 +87,7 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
   ])
 
   let probFora = firstNumber(row, [
-    "prob_away_win",        // ← nome real na tabela resultado_vencedor
-    "predicted_away_win_prob",
-    "predicted_away_probability",
-    "away_win_prob",
-    "prob_fora",
-    "prob_away",
-    "probabilidade_fora",
-  ])
-
-  if (probCasa !== null && probFora === null) {
-    probFora = 1 - probCasa
-  }
-
-  return { probCasa, probFora }
-}
-
-  let probFora = firstNumber(row, [
+    "prob_away_win",
     "predicted_away_win_prob",
     "predicted_away_probability",
     "away_win_prob",
@@ -146,7 +130,7 @@ export function getProjectionFromPlayer(row: ResultadoJogador) {
     "predicted_player_points",
     "predicted_player_assists",
     "predicted_player_rebounds",
-    "predicted_player_fg3m",  // ← adicionado
+    "predicted_player_fg3m",
     "predicted_player_threes",
     "predicted_value",
     "prediction",
@@ -177,7 +161,6 @@ export function getModelConfidence(row: Record<string, any>): number | null {
   return firstNumber(row, ["model_confidence", "confidence", "confianca_modelo"])
 }
 
-// ── Leitura de probabilidades e EV do banco ──────────────
 export function getProbOver(row: Record<string, any>): number | null {
   return firstNumber(row, ["prob_over"])
 }
@@ -198,9 +181,6 @@ export function getDiffProjecaoLinha(row: Record<string, any>): number | null {
   return firstNumber(row, ["diff_projecao_linha"])
 }
 
-// ── EV calculado localmente quando prob vem do banco ─────
-// prob já é a probabilidade real do modelo (distribuição normal + MAE)
-// ev = prob * odd - 1
 export function calcularEvLocal(prob: number | null, odd: number | null): number | null {
   if (prob === null || odd === null) return null
   return prob * odd - 1
@@ -214,7 +194,6 @@ export function getWinnerBetRankingItem(params: {
   const { row, jogo, odds } = params
   const { probCasa, probFora } = getProjectionFromGameWinner(row)
   const modelConfidence = getModelConfidence(row) ?? 0
-
   const items: RankingItem[] = []
 
   if (probCasa !== null && odds.oddHome) {
@@ -266,22 +245,12 @@ export function getLineBetRankingItem(params: {
   oddOver?: number
   oddUnder?: number
   modelConfidence?: number | null
-  // probabilidades reais vindas do banco (calculadas com MAE do modelo)
   probOver?: number | null
   probUnder?: number | null
 }): RankingItem[] {
   const {
-    keyBase,
-    mercado,
-    titulo,
-    subtitulo,
-    projecao,
-    linha,
-    oddOver,
-    oddUnder,
-    modelConfidence,
-    probOver,
-    probUnder,
+    keyBase, mercado, titulo, subtitulo, projecao,
+    linha, oddOver, oddUnder, modelConfidence, probOver, probUnder,
   } = params
 
   if (projecao === null || linha === undefined || linha === null) return []
@@ -289,38 +258,20 @@ export function getLineBetRankingItem(params: {
   const edgeOver = projecao - linha
   const edgeUnder = linha - projecao
   const mc = modelConfidence ?? 0
-
   const isPlayerMarket = ["Pontos", "Assistências", "Rebotes", "Cestas de 3"].includes(mercado)
   const categoria: "Jogo" | "Jogador" = isPlayerMarket ? "Jogador" : "Jogo"
-
   const items: RankingItem[] = []
 
   if (oddOver) {
-    // Usa prob do banco se disponível, senão fallback simples
     const prob = probOver !== null && probOver !== undefined
       ? probOver
       : 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25) * (edgeOver >= 0 ? 1 : -1)
-
     const ev = calcularEvLocal(prob, oddOver)
-
     items.push({
       key: `${keyBase}-over`,
-      categoria,
-      mercado,
-      titulo,
-      subtitulo,
-      lado: "Over",
-      linha,
-      odd: oddOver,
-      prob,
-      projecao,
-      edge: edgeOver,
-      ev,
-      confianca: Math.round((
-        Math.abs(edgeOver) * 10 +
-        Math.max(ev ?? 0, 0) * 100 +
-        mc * 0.5
-      ) * 10) / 10,
+      categoria, mercado, titulo, subtitulo,
+      lado: "Over", linha, odd: oddOver, prob, projecao, edge: edgeOver, ev,
+      confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
     })
   }
 
@@ -328,27 +279,12 @@ export function getLineBetRankingItem(params: {
     const prob = probUnder !== null && probUnder !== undefined
       ? probUnder
       : 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25) * (edgeUnder >= 0 ? 1 : -1)
-
     const ev = calcularEvLocal(prob, oddUnder)
-
     items.push({
       key: `${keyBase}-under`,
-      categoria,
-      mercado,
-      titulo,
-      subtitulo,
-      lado: "Under",
-      linha,
-      odd: oddUnder,
-      prob,
-      projecao,
-      edge: edgeUnder,
-      ev,
-      confianca: Math.round((
-        Math.abs(edgeUnder) * 10 +
-        Math.max(ev ?? 0, 0) * 100 +
-        mc * 0.5
-      ) * 10) / 10,
+      categoria, mercado, titulo, subtitulo,
+      lado: "Under", linha, odd: oddUnder, prob, projecao, edge: edgeUnder, ev,
+      confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
     })
   }
 

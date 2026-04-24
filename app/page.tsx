@@ -422,9 +422,9 @@ export default function Home() {
                 const key = `handicap-${selectedGame.game_id}`
                 const odds = oddsMap[key] || {}
                 const evOver = odds.linha && odds.oddOver && proj != null
-                  ? (() => { const d = proj - odds.linha!; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddOver! - 1 })() : null
+                  ? (() => { const d = odds.linha! - proj; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddOver! - 1 })() : null
                 const evUnder = odds.linha && odds.oddUnder && proj != null
-                  ? (() => { const d = odds.linha! - proj; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddUnder! - 1 })() : null
+                  ? (() => { const d = proj - odds.linha!; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddUnder! - 1 })() : null
 
                 // predicted_point_diff = pontos_casa - pontos_fora
                 // proj > 0 → Jarvis projeta vitória do mandante → mandante é favorito (spread negativo)

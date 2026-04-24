@@ -4,19 +4,19 @@ export type Game = {
   fora: string
   data: string
 }
-
+ 
 export type ResultadoJogo = {
   game_id: string
   [key: string]: any
 }
-
+ 
 export type ResultadoJogador = {
   game_id: string
   player_id: string
   player_name: string
   [key: string]: any
 }
-
+ 
 export type OddsInput = {
   linha?: number
   oddOver?: number
@@ -24,7 +24,7 @@ export type OddsInput = {
   oddHome?: number
   oddAway?: number
 }
-
+ 
 export type RankingItem = {
   key: string
   categoria: "Jogo" | "Jogador"
@@ -40,7 +40,7 @@ export type RankingItem = {
   ev: number | null
   confianca: number
 }
-
+ 
 function normalizeObject(obj: Record<string, any>) {
   const normalized: Record<string, any> = {}
   for (const key of Object.keys(obj || {})) {
@@ -49,7 +49,7 @@ function normalizeObject(obj: Record<string, any>) {
   }
   return normalized
 }
-
+ 
 function firstNumber(obj: Record<string, any>, candidates: string[]): number | null {
   const row = normalizeObject(obj)
   for (const c of candidates) {
@@ -62,7 +62,7 @@ function firstNumber(obj: Record<string, any>, candidates: string[]): number | n
   }
   return null
 }
-
+ 
 function firstString(obj: Record<string, any>, candidates: string[]): string | null {
   const row = normalizeObject(obj)
   for (const c of candidates) {
@@ -74,7 +74,48 @@ function firstString(obj: Record<string, any>, candidates: string[]): string | n
   }
   return null
 }
-
+ 
+// ── EV unificado ─────────────────────────────────────────
+// Fórmula única usada em todos os lugares (card e ranking).
+// tipo "total" e "jogador": Over = proj > linha → EV positivo
+// tipo "handicap":          Over = linha > proj → EV positivo (banca pede mais do que Jarvis projeta)
+// prob do banco quando disponível — fallback com ajuste por edge
+export function calcularEvOver(
+  proj: number,
+  linha: number,
+  odd: number,
+  tipo: "total" | "handicap" | "jogador",
+  probBanco?: number | null
+): number {
+  if (probBanco != null) return probBanco * odd - 1
+ 
+  // d positivo = sinal favorável ao Over
+  const d = tipo === "handicap" ? linha - proj : proj - linha
+  const prob = 0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(linha), 1), 0.25) * (d >= 0 ? 1 : -1)
+  return prob * odd - 1
+}
+ 
+export function calcularEvUnder(
+  proj: number,
+  linha: number,
+  odd: number,
+  tipo: "total" | "handicap" | "jogador",
+  probBanco?: number | null
+): number {
+  if (probBanco != null) return probBanco * odd - 1
+ 
+  // d positivo = sinal favorável ao Under
+  const d = tipo === "handicap" ? proj - linha : linha - proj
+  const prob = 0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(linha), 1), 0.25) * (d >= 0 ? 1 : -1)
+  return prob * odd - 1
+}
+ 
+export function calcularEvLocal(prob: number | null, odd: number | null): number | null {
+  if (prob === null || odd === null) return null
+  return prob * odd - 1
+}
+ 
+// ── Projeções ─────────────────────────────────────────────
 export function getProjectionFromGameWinner(row: ResultadoJogo) {
   const probCasa = firstNumber(row, [
     "prob_home_win",
@@ -85,7 +126,7 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
     "prob_home",
     "probabilidade_casa",
   ])
-
+ 
   let probFora = firstNumber(row, [
     "prob_away_win",
     "predicted_away_win_prob",
@@ -95,14 +136,14 @@ export function getProjectionFromGameWinner(row: ResultadoJogo) {
     "prob_away",
     "probabilidade_fora",
   ])
-
+ 
   if (probCasa !== null && probFora === null) {
     probFora = 1 - probCasa
   }
-
+ 
   return { probCasa, probFora }
 }
-
+ 
 export function getProjectionFromGameTotal(row: ResultadoJogo) {
   return firstNumber(row, [
     "predicted_total_points",
@@ -113,7 +154,7 @@ export function getProjectionFromGameTotal(row: ResultadoJogo) {
     "total_points_pred",
   ])
 }
-
+ 
 export function getProjectionFromGameHandicap(row: ResultadoJogo) {
   return firstNumber(row, [
     "predicted_point_diff",
@@ -124,7 +165,7 @@ export function getProjectionFromGameHandicap(row: ResultadoJogo) {
     "handicap_pred",
   ])
 }
-
+ 
 export function getProjectionFromPlayer(row: ResultadoJogador) {
   return firstNumber(row, [
     "predicted_player_points",
@@ -139,7 +180,7 @@ export function getProjectionFromPlayer(row: ResultadoJogador) {
     "predicao",
   ])
 }
-
+ 
 export function getMinutesAverage(row: ResultadoJogador) {
   return firstNumber(row, [
     "player_minutes_avg",
@@ -148,44 +189,40 @@ export function getMinutesAverage(row: ResultadoJogador) {
     "minutes_l5",
   ])
 }
-
+ 
 export function getPlayerTeam(row: ResultadoJogador) {
   return firstString(row, ["team_abbr", "team", "time"]) || "-"
 }
-
+ 
 export function getPlayerOpponent(row: ResultadoJogador) {
   return firstString(row, ["opponent_team_abbr", "opponent", "adversario"]) || "-"
 }
-
+ 
 export function getModelConfidence(row: Record<string, any>): number | null {
   return firstNumber(row, ["model_confidence", "confidence", "confianca_modelo"])
 }
-
+ 
 export function getProbOver(row: Record<string, any>): number | null {
   return firstNumber(row, ["prob_over"])
 }
-
+ 
 export function getProbUnder(row: Record<string, any>): number | null {
   return firstNumber(row, ["prob_under"])
 }
-
+ 
 export function getEvOver(row: Record<string, any>): number | null {
   return firstNumber(row, ["ev_over"])
 }
-
+ 
 export function getEvUnder(row: Record<string, any>): number | null {
   return firstNumber(row, ["ev_under"])
 }
-
+ 
 export function getDiffProjecaoLinha(row: Record<string, any>): number | null {
   return firstNumber(row, ["diff_projecao_linha"])
 }
-
-export function calcularEvLocal(prob: number | null, odd: number | null): number | null {
-  if (prob === null || odd === null) return null
-  return prob * odd - 1
-}
-
+ 
+// ── Ranking items ─────────────────────────────────────────
 export function getWinnerBetRankingItem(params: {
   row: ResultadoJogo
   jogo: Game
@@ -195,7 +232,7 @@ export function getWinnerBetRankingItem(params: {
   const { probCasa, probFora } = getProjectionFromGameWinner(row)
   const modelConfidence = getModelConfidence(row) ?? 0
   const items: RankingItem[] = []
-
+ 
   if (probCasa !== null && odds.oddHome) {
     const ev = probCasa * odds.oddHome - 1
     items.push({
@@ -213,7 +250,7 @@ export function getWinnerBetRankingItem(params: {
       confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
     })
   }
-
+ 
   if (probFora !== null && odds.oddAway) {
     const ev = probFora * odds.oddAway - 1
     items.push({
@@ -231,10 +268,10 @@ export function getWinnerBetRankingItem(params: {
       confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
     })
   }
-
+ 
   return items
 }
-
+ 
 export function getLineBetRankingItem(params: {
   keyBase: string
   mercado: string
@@ -247,46 +284,55 @@ export function getLineBetRankingItem(params: {
   modelConfidence?: number | null
   probOver?: number | null
   probUnder?: number | null
+  // tipo determina a direção do EV quando prob do banco não está disponível
+  tipo?: "total" | "handicap" | "jogador"
 }): RankingItem[] {
   const {
     keyBase, mercado, titulo, subtitulo, projecao,
-    linha, oddOver, oddUnder, modelConfidence, probOver, probUnder,
+    linha, oddOver, oddUnder, modelConfidence,
+    probOver, probUnder, tipo,
   } = params
-
+ 
   if (projecao === null || linha === undefined || linha === null) return []
-
-  const edgeOver = projecao - linha
-  const edgeUnder = linha - projecao
+ 
   const mc = modelConfidence ?? 0
   const isPlayerMarket = ["Pontos", "Assistências", "Rebotes", "Cestas de 3"].includes(mercado)
   const categoria: "Jogo" | "Jogador" = isPlayerMarket ? "Jogador" : "Jogo"
+ 
+  // Inferir tipo pelo mercado se não passado
+  const tipoEfetivo: "total" | "handicap" | "jogador" =
+    tipo ?? (mercado === "Handicap" ? "handicap" : isPlayerMarket ? "jogador" : "total")
+ 
+  const edgeOver = tipoEfetivo === "handicap" ? linha - projecao : projecao - linha
+  const edgeUnder = tipoEfetivo === "handicap" ? projecao - linha : linha - projecao
+ 
   const items: RankingItem[] = []
-
+ 
   if (oddOver) {
-    const prob = probOver !== null && probOver !== undefined
-      ? probOver
+    const ev = calcularEvOver(projecao, linha, oddOver, tipoEfetivo, probOver)
+    const prob = probOver != null ? probOver
       : 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25) * (edgeOver >= 0 ? 1 : -1)
-    const ev = calcularEvLocal(prob, oddOver)
     items.push({
       key: `${keyBase}-over`,
       categoria, mercado, titulo, subtitulo,
-      lado: "Over", linha, odd: oddOver, prob, projecao, edge: edgeOver, ev,
+      lado: "Over", linha, odd: oddOver, prob, projecao,
+      edge: edgeOver, ev,
       confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
     })
   }
-
+ 
   if (oddUnder) {
-    const prob = probUnder !== null && probUnder !== undefined
-      ? probUnder
+    const ev = calcularEvUnder(projecao, linha, oddUnder, tipoEfetivo, probUnder)
+    const prob = probUnder != null ? probUnder
       : 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25) * (edgeUnder >= 0 ? 1 : -1)
-    const ev = calcularEvLocal(prob, oddUnder)
     items.push({
       key: `${keyBase}-under`,
       categoria, mercado, titulo, subtitulo,
-      lado: "Under", linha, odd: oddUnder, prob, projecao, edge: edgeUnder, ev,
+      lado: "Under", linha, odd: oddUnder, prob, projecao,
+      edge: edgeUnder, ev,
       confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
     })
   }
-
+ 
   return items
 }

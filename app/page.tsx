@@ -9,6 +9,8 @@ import {
   ResultadoJogo,
   ResultadoJogador,
   calcularEvLocal,
+  calcularEvOver,
+  calcularEvUnder,
   getLineBetRankingItem,
   getMinutesAverage,
   getModelConfidence,
@@ -182,6 +184,7 @@ export default function Home() {
           linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder,
           modelConfidence: getModelConfidence(total),
           probOver: null, probUnder: null,
+          tipo: "total",
         }))
       }
 
@@ -196,6 +199,7 @@ export default function Home() {
           linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder,
           modelConfidence: getModelConfidence(handicap),
           probOver: null, probUnder: null,
+          tipo: "handicap",
         }))
       }
     }
@@ -373,10 +377,12 @@ export default function Home() {
                 const conf = getModelConfidence(totalRow)
                 const key = `total-${selectedGame.game_id}`
                 const odds = oddsMap[key] || {}
-                const evOver = odds.linha && odds.oddOver && proj != null
-                  ? (() => { const d = proj - odds.linha!; return (0.5 + Math.min(Math.abs(d) / Math.max(odds.linha!, 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddOver! - 1 })() : null
-                const evUnder = odds.linha && odds.oddUnder && proj != null
-                  ? (() => { const d = odds.linha! - proj; return (0.5 + Math.min(Math.abs(d) / Math.max(odds.linha!, 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddUnder! - 1 })() : null
+                const evOver = odds.linha && odds.oddOver && proj != null ? calcularEvOver(proj, odds.linha, odds.oddOver, "total") : null
+                const evUnder = odds.linha && odds.oddUnder && proj != null ? calcularEvUnder(proj, odds.linha, odds.oddUnder, "total") : null
+
+
+
+
                 return (
                   <>
                     <div style={S.cardHeader}>
@@ -421,10 +427,12 @@ export default function Home() {
                 const conf = getModelConfidence(handicapRow)
                 const key = `handicap-${selectedGame.game_id}`
                 const odds = oddsMap[key] || {}
-                const evOver = odds.linha && odds.oddOver && proj != null
-                  ? (() => { const d = odds.linha! - proj; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddOver! - 1 })() : null
-                const evUnder = odds.linha && odds.oddUnder && proj != null
-                  ? (() => { const d = proj - odds.linha!; return (0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(odds.linha!), 1), 0.25) * (d >= 0 ? 1 : -1)) * odds.oddUnder! - 1 })() : null
+                const evOver = odds.linha && odds.oddOver && proj != null ? calcularEvOver(proj, odds.linha, odds.oddOver, "handicap") : null
+                const evUnder = odds.linha && odds.oddUnder && proj != null ? calcularEvUnder(proj, odds.linha, odds.oddUnder, "handicap") : null
+
+
+
+
 
                 // predicted_point_diff = pontos_casa - pontos_fora
                 // proj > 0 → Jarvis projeta vitória do mandante → mandante é favorito (spread negativo)

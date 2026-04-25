@@ -39,47 +39,71 @@ export type RankingItem = {
   edge: number
   ev: number | null
   confianca: number
+  scoreJarvis: number | null
 }
  
-function normalizeObject(obj: Record<string, any>) {
-  const normalized: Record<string, any> = {}
-  for (const key of Object.keys(obj || {})) {
-    normalized[key] = obj[key]
-    normalized[key.toLowerCase()] = obj[key]
-  }
-  return normalized
+// ── Score Jarvis ──────────────────────────────────────────
+// Score de 0 a 100 que combina:
+// 1. Probabilidade do evento (30%) — quanto maior, melhor
+// 2. Qualidade do modelo/mercado (30%) — baseado no R² real de cada modelo
+// 3. EV na zona ideal 5%-20% (25%) — penaliza abaixo e acima (curva em sino)
+// 4. Confiança do modelo (15%) — score interno 0-100
+//
+// Pesos de qualidade por mercado (baseados nos R² reais):
+// Pontos: 0.558 → 1.00 | Assists: 0.551 → 1.00 | Rebounds: 0.525 → 0.95
+// Threes: 0.482 → 0.87 | Handicap: 0.152 → 0.45 | Vencedor AUC 0.695 → 0.55
+// Total: 0.067 → 0.20
+ 
+const QUALIDADE_MERCADO: Record<string, number> = {
+  "Pontos":          1.00,
+  "Assistências":    1.00,
+  "Rebotes":         0.95,
+  "Cestas de 3":     0.87,
+  "Handicap":        0.45,
+  "Vencedor":        0.55,
+  "Total de Pontos": 0.20,
 }
  
-function firstNumber(obj: Record<string, any>, candidates: string[]): number | null {
-  const row = normalizeObject(obj)
-  for (const c of candidates) {
-    const key = c.toLowerCase()
-    const value = row[key]
-    if (value !== undefined && value !== null && value !== "") {
-      const n = Number(value)
-      if (!Number.isNaN(n)) return n
-    }
-  }
-  return null
-}
+export function calcularScoreJarvis(
+  ev: number | null,
+  prob: number | null,
+  confianca: number | null,
+  mercado: string
+): number | null {
+  if (ev === null || prob === null) return null
  
-function firstString(obj: Record<string, any>, candidates: string[]): string | null {
-  const row = normalizeObject(obj)
-  for (const c of candidates) {
-    const key = c.toLowerCase()
-    const value = row[key]
-    if (value !== undefined && value !== null && value !== "") {
-      return String(value)
-    }
+  // 1. Probabilidade (0-100): prob 50% = 0pts, prob 75%+ = 100pts
+  const compProb = Math.min(Math.max((prob - 0.5) / 0.25, 0), 1) * 100
+ 
+  // 2. Qualidade do mercado (0-100)
+  const qualidade = QUALIDADE_MERCADO[mercado] ?? 0.5
+  const compQualidade = qualidade * 100
+ 
+  // 3. EV na zona ideal — pico em 12%, penaliza <3% e >25%
+  const evPct = ev * 100
+  let compEv = 0
+  if (evPct >= 3 && evPct <= 30) {
+    const distancia = Math.abs(evPct - 12)
+    compEv = Math.max(0, 100 - distancia * 6)
+  } else if (evPct > 30) {
+    // EV muito alto = suspeito, penaliza progressivamente
+    compEv = Math.max(0, 100 - (evPct - 30) * 8)
   }
-  return null
+  // evPct < 3 = compEv permanece 0
+ 
+  // 4. Confiança do modelo (já 0-100)
+  const compConfianca = Math.min(Math.max(confianca ?? 0, 0), 100)
+ 
+  const score =
+    compProb      * 0.30 +
+    compQualidade * 0.30 +
+    compEv        * 0.25 +
+    compConfianca * 0.15
+ 
+  return Math.round(score * 10) / 10
 }
  
 // ── EV unificado ─────────────────────────────────────────
-// Fórmula única usada em todos os lugares (card e ranking).
-// tipo "total" e "jogador": Over = proj > linha → EV positivo
-// tipo "handicap":          Over = linha > proj → EV positivo (banca pede mais do que Jarvis projeta)
-// prob do banco quando disponível — fallback com ajuste por edge
 export function calcularEvOver(
   proj: number,
   linha: number,
@@ -88,8 +112,6 @@ export function calcularEvOver(
   probBanco?: number | null
 ): number {
   if (probBanco != null) return probBanco * odd - 1
- 
-  // d positivo = sinal favorável ao Over
   const d = tipo === "handicap" ? linha - proj : proj - linha
   const prob = 0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(linha), 1), 0.25) * (d >= 0 ? 1 : -1)
   return prob * odd - 1
@@ -103,8 +125,6 @@ export function calcularEvUnder(
   probBanco?: number | null
 ): number {
   if (probBanco != null) return probBanco * odd - 1
- 
-  // d positivo = sinal favorável ao Under
   const d = tipo === "handicap" ? proj - linha : linha - proj
   const prob = 0.5 + Math.min(Math.abs(d) / Math.max(Math.abs(linha), 1), 0.25) * (d >= 0 ? 1 : -1)
   return prob * odd - 1
@@ -222,6 +242,41 @@ export function getDiffProjecaoLinha(row: Record<string, any>): number | null {
   return firstNumber(row, ["diff_projecao_linha"])
 }
  
+// ── Helpers internos ──────────────────────────────────────
+function normalizeObject(obj: Record<string, any>) {
+  const normalized: Record<string, any> = {}
+  for (const key of Object.keys(obj || {})) {
+    normalized[key] = obj[key]
+    normalized[key.toLowerCase()] = obj[key]
+  }
+  return normalized
+}
+ 
+function firstNumber(obj: Record<string, any>, candidates: string[]): number | null {
+  const row = normalizeObject(obj)
+  for (const c of candidates) {
+    const key = c.toLowerCase()
+    const value = row[key]
+    if (value !== undefined && value !== null && value !== "") {
+      const n = Number(value)
+      if (!Number.isNaN(n)) return n
+    }
+  }
+  return null
+}
+ 
+function firstString(obj: Record<string, any>, candidates: string[]): string | null {
+  const row = normalizeObject(obj)
+  for (const c of candidates) {
+    const key = c.toLowerCase()
+    const value = row[key]
+    if (value !== undefined && value !== null && value !== "") {
+      return String(value)
+    }
+  }
+  return null
+}
+ 
 // ── Ranking items ─────────────────────────────────────────
 export function getWinnerBetRankingItem(params: {
   row: ResultadoJogo
@@ -247,7 +302,8 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probCasa - 1 / odds.oddHome,
       ev,
-      confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
+      confianca: modelConfidence,
+      scoreJarvis: calcularScoreJarvis(ev, probCasa, modelConfidence, "Vencedor"),
     })
   }
  
@@ -265,7 +321,8 @@ export function getWinnerBetRankingItem(params: {
       projecao: null,
       edge: probFora - 1 / odds.oddAway,
       ev,
-      confianca: Math.round((Math.max(ev, 0) * 100 + modelConfidence * 0.5) * 10) / 10,
+      confianca: modelConfidence,
+      scoreJarvis: calcularScoreJarvis(ev, probFora, modelConfidence, "Vencedor"),
     })
   }
  
@@ -284,7 +341,6 @@ export function getLineBetRankingItem(params: {
   modelConfidence?: number | null
   probOver?: number | null
   probUnder?: number | null
-  // tipo determina a direção do EV quando prob do banco não está disponível
   tipo?: "total" | "handicap" | "jogador"
 }): RankingItem[] {
   const {
@@ -299,17 +355,16 @@ export function getLineBetRankingItem(params: {
   const isPlayerMarket = ["Pontos", "Assistências", "Rebotes", "Cestas de 3"].includes(mercado)
   const categoria: "Jogo" | "Jogador" = isPlayerMarket ? "Jogador" : "Jogo"
  
-  // Inferir tipo pelo mercado se não passado
   const tipoEfetivo: "total" | "handicap" | "jogador" =
     tipo ?? (mercado === "Handicap" ? "handicap" : isPlayerMarket ? "jogador" : "total")
  
-  const edgeOver = tipoEfetivo === "handicap" ? linha - projecao : projecao - linha
+  const edgeOver  = tipoEfetivo === "handicap" ? linha - projecao : projecao - linha
   const edgeUnder = tipoEfetivo === "handicap" ? projecao - linha : linha - projecao
  
   const items: RankingItem[] = []
  
   if (oddOver) {
-    const ev = calcularEvOver(projecao, linha, oddOver, tipoEfetivo, probOver)
+    const ev   = calcularEvOver(projecao, linha, oddOver, tipoEfetivo, probOver)
     const prob = probOver != null ? probOver
       : 0.5 + Math.min(Math.abs(edgeOver) / Math.max(Math.abs(linha), 1), 0.25) * (edgeOver >= 0 ? 1 : -1)
     items.push({
@@ -317,12 +372,13 @@ export function getLineBetRankingItem(params: {
       categoria, mercado, titulo, subtitulo,
       lado: "Over", linha, odd: oddOver, prob, projecao,
       edge: edgeOver, ev,
-      confianca: Math.round((Math.abs(edgeOver) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
+      confianca: mc,
+      scoreJarvis: calcularScoreJarvis(ev, prob, mc, mercado),
     })
   }
  
   if (oddUnder) {
-    const ev = calcularEvUnder(projecao, linha, oddUnder, tipoEfetivo, probUnder)
+    const ev   = calcularEvUnder(projecao, linha, oddUnder, tipoEfetivo, probUnder)
     const prob = probUnder != null ? probUnder
       : 0.5 + Math.min(Math.abs(edgeUnder) / Math.max(Math.abs(linha), 1), 0.25) * (edgeUnder >= 0 ? 1 : -1)
     items.push({
@@ -330,7 +386,8 @@ export function getLineBetRankingItem(params: {
       categoria, mercado, titulo, subtitulo,
       lado: "Under", linha, odd: oddUnder, prob, projecao,
       edge: edgeUnder, ev,
-      confianca: Math.round((Math.abs(edgeUnder) * 10 + Math.max(ev ?? 0, 0) * 100 + mc * 0.5) * 10) / 10,
+      confianca: mc,
+      scoreJarvis: calcularScoreJarvis(ev, prob, mc, mercado),
     })
   }
  

@@ -9,6 +9,7 @@ import {
   ResultadoJogo,
   ResultadoJogador,
   calcularEvLocal,
+  calcularScoreJarvis,
   calcularEvOver,
   calcularEvUnder,
   getLineBetRankingItem,
@@ -228,7 +229,7 @@ export default function Home() {
         }))
       }
     }
-    return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.ev ?? -999) - (a.ev ?? -999))
+    return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999))
   }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
 
   function handleOddsChange(key: string, field: keyof OddsInput, value: string) {
@@ -242,6 +243,7 @@ export default function Home() {
   const fn = (n: number | null | undefined, d = 1) => (n == null || Number.isNaN(n)) ? "—" : Number(n).toFixed(d)
   const evColor = (ev: number | null) => ev == null ? C.textDim : ev > 0.05 ? "#22c55e" : ev > 0 ? "#f59e0b" : "#ef4444"
   const confColor = (c: number | null) => c == null ? C.textDim : c >= 70 ? "#22c55e" : c >= 40 ? "#f59e0b" : C.textDim
+  const scoreColor = (s: number | null) => s == null ? C.textDim : s >= 65 ? "#E8B84B" : s >= 45 ? "#C9982A" : C.textMuted
 
   const S = styles
 
@@ -598,6 +600,14 @@ export default function Home() {
                       {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
                     </div>
                     <div style={S.rankEvLabel}>EV</div>
+                    {item.scoreJarvis != null && (
+                      <div style={S.rankScoreBadge}>
+                        <span style={{ ...S.rankScoreValue, color: scoreColor(item.scoreJarvis) }}>
+                          {item.scoreJarvis.toFixed(0)}
+                        </span>
+                        <span style={S.rankScoreLabel}>SCORE</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -780,6 +790,14 @@ const styles: Record<string, React.CSSProperties> = {
   evMini: { fontSize: 10, fontWeight: 700, textAlign: "center" as any },
 
   rankList: { display: "flex", flexDirection: "column" as any, gap: 6 },
+  rankScoreBadge: {
+    display: "flex", flexDirection: "column" as any, alignItems: "center",
+    marginTop: 6, padding: "4px 8px",
+    background: "#1A1205", border: "1px solid #3A2D14",
+    borderRadius: 6,
+  },
+  rankScoreValue: { fontSize: 15, fontWeight: 800 },
+  rankScoreLabel: { fontSize: 8, fontWeight: 700, color: "#4A3C28", letterSpacing: "1px" },
   rankRow: {
     display: "flex", alignItems: "flex-start", gap: 10,
     background: C.surfaceRaised, border: `1px solid ${C.border}`,

@@ -187,7 +187,7 @@ export default function Home() {
   const [activePlayerMarket, setActivePlayerMarket] = useState<"pts" | "ast" | "reb" | "fg3m">("pts")
   const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "selecao" | "apostas">("jogos")
   const [loading, setLoading] = useState(true)
-  const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
+  const [oddsMap, setOddsMap] = useState<Record<string, any>>({})
   const [sugestaoOdds, setSugestaoOdds] = useState<Record<string, { oddBanca?: number; linhaBanca?: number }>>({})
   const [thresholdOdds, setThresholdOdds] = useState<Record<string, number>>({})
   const [activeCell, setActiveCell] = useState<{ key: string; threshold: number; prob: number; oddJustaVal: number; mercado: string; titulo: string; subtitulo: string; projecao: number } | null>(null)
@@ -622,8 +622,19 @@ export default function Home() {
     await loadApostas()
   }
 
+  function normalizarEntradaDecimal(value: string) {
+    return value.replace(",", ".")
+  }
+
   function handleOddsChange(key: string, field: keyof OddsInput, value: string) {
-    setOddsMap((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) } }))
+    const valorNormalizado = normalizarEntradaDecimal(value)
+    setOddsMap((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        [field]: valorNormalizado === "" ? undefined : valorNormalizado,
+      },
+    }))
   }
 
   function toggleApostaParaRegistrar(key: string) {
@@ -744,14 +755,14 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{selectedGame.casa} (mín {ojCasa ?? "—"})</div>
-                    <input type="number" step="0.01" placeholder={ojCasa?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojCasa?.toString() ?? "Odd"}
                       value={odds.oddHome ?? ""} onChange={(e) => handleOddsChange(key, "oddHome", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddHome && ojCasa ? (odds.oddHome >= ojCasa ? C.green : C.red) : C.border2 }} />
                     {evHome != null && <div style={{ ...S.evTag, color: semaforoEv(evHome) }}>EV {evHome > 0 ? "+" : ""}{(evHome * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{selectedGame.fora} (mín {ojFora ?? "—"})</div>
-                    <input type="number" step="0.01" placeholder={ojFora?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojFora?.toString() ?? "Odd"}
                       value={odds.oddAway ?? ""} onChange={(e) => handleOddsChange(key, "oddAway", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddAway && ojFora ? (odds.oddAway >= ojFora ? C.green : C.red) : C.border2 }} />
                     {evAway != null && <div style={{ ...S.evTag, color: semaforoEv(evAway) }}>EV {evAway > 0 ? "+" : ""}{(evAway * 100).toFixed(1)}%</div>}
@@ -783,7 +794,7 @@ export default function Home() {
                   <div style={S.projSub}>Projeção Jarvis</div>
                 </div>
                 <div style={S.lineRow}>
-                  <input type="number" step="0.5" placeholder="Linha da banca"
+                  <input type="text" inputMode="decimal" step="0.5" placeholder="Linha da banca"
                     value={odds.linha ?? ""} onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                     style={{ ...S.oddInput, flex: 1 }} />
                 </div>
@@ -796,14 +807,14 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>Over {ojOver ? `(mín ${ojOver})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddOver && ojOver ? (odds.oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
                     {evOver != null && <div style={{ ...S.evTag, color: semaforoEv(evOver) }}>EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>Under {ojUnder ? `(mín ${ojUnder})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddUnder && ojUnder ? (odds.oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
                     {evUnder != null && <div style={{ ...S.evTag, color: semaforoEv(evUnder) }}>EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%</div>}
@@ -843,7 +854,7 @@ export default function Home() {
                   <div style={S.projSub}>Favorito Jarvis: <strong style={{ color: C.gold }}>{favorito}</strong></div>
                 </div>
                 <div style={S.lineRow}>
-                  <input type="number" step="0.5" placeholder="Linha (ex: 9.5)"
+                  <input type="text" inputMode="decimal" step="0.5" placeholder="Linha (ex: 9.5)"
                     value={odds.linha ?? ""} onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                     style={{ ...S.oddInput, flex: 1 }} />
                 </div>
@@ -856,14 +867,14 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddOver && ojFav ? (odds.oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
                     {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
+                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
                       style={{ ...S.oddInput, borderColor: odds.oddUnder && ojAz ? (odds.oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
                     {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
@@ -913,9 +924,9 @@ export default function Home() {
                 </div>
               </div>
               <div style={S.oddLabel}>Odd da banca (mín: {activeCell.oddJustaVal.toFixed(2)})</div>
-              <input type="number" step="0.01" placeholder={activeCell.oddJustaVal.toFixed(2)}
+              <input type="text" inputMode="decimal" step="0.01" placeholder={activeCell.oddJustaVal.toFixed(2)}
                 value={thresholdOdds[activeCell.key] ?? ""}
-                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: Number(e.target.value) }))}
+                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: Number(normalizarEntradaDecimal(e.target.value)) }))}
                 style={{ ...S.oddInput, marginBottom: 8, marginTop: 4 }} />
               {thresholdOdds[activeCell.key] != null && (() => {
                 const ob = thresholdOdds[activeCell.key]
@@ -1009,7 +1020,7 @@ export default function Home() {
                       })}
 
                       <div style={S.tableColOutra}>
-                        <input type="number" step="0.5" placeholder=",5"
+                        <input type="text" inputMode="decimal" step="0.5" placeholder=",5"
                           value={odds.linha ?? ""}
                           onChange={(e) => handleOddsChange(playerKey, "linha", e.target.value)}
                           style={{ ...S.playerInputSmall, width: "100%" }} />
@@ -1021,13 +1032,13 @@ export default function Home() {
                           return (
                             <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
                               <div style={{ flex: 1 }}>
-                                <input type="number" step="0.01" placeholder={ojO?.toString() ?? "Over"}
+                                <input type="text" inputMode="decimal" step="0.01" placeholder={ojO?.toString() ?? "Over"}
                                   value={odds.oddOver ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddOver", e.target.value)}
                                   style={{ ...S.playerInputSmall, borderColor: odds.oddOver && ojO ? (odds.oddOver >= ojO ? C.green : C.red) : C.border2 }} />
                               </div>
                               <div style={{ flex: 1 }}>
-                                <input type="number" step="0.01" placeholder={ojU?.toString() ?? "Und"}
+                                <input type="text" inputMode="decimal" step="0.01" placeholder={ojU?.toString() ?? "Und"}
                                   value={odds.oddUnder ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddUnder", e.target.value)}
                                   style={{ ...S.playerInputSmall, borderColor: odds.oddUnder && ojU ? (odds.oddUnder >= ojU ? C.green : C.red) : C.border2 }} />
@@ -1050,8 +1061,8 @@ export default function Home() {
           <div style={S.filtrosRow}>
             <div style={S.filtroGroup}>
               <div style={S.oddLabel}>Qtd</div>
-              <input type="number" step="1" min={1} max={30} value={filtroQtd}
-                onChange={(e) => setFiltroQtd(Number(e.target.value))}
+              <input type="text" inputMode="numeric" step="1" min={1} max={30} value={filtroQtd}
+                onChange={(e) => setFiltroQtd(Number(normalizarEntradaDecimal(e.target.value)))}
                 style={{ ...S.playerInputSmall, width: 50 }} />
             </div>
           </div>
@@ -1171,8 +1182,8 @@ export default function Home() {
               <div style={S.filtrosRow}>
                 <div style={S.filtroGroup}>
                   <div style={S.oddLabel}>Odd máx múltiplas</div>
-                  <input type="number" step="0.1" value={filtroOddMax}
-                    onChange={(e) => setFiltroOddMax(Number(e.target.value))}
+                  <input type="text" inputMode="decimal" step="0.1" value={filtroOddMax}
+                    onChange={(e) => setFiltroOddMax(Number(normalizarEntradaDecimal(e.target.value)))}
                     style={{ ...S.playerInputSmall, width: 70 }} />
                 </div>
               </div>

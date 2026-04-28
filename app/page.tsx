@@ -1069,10 +1069,10 @@ export default function Home() {
                     item.mercado,
                     item.titulo,
                     item.lado,
-                    item.prob,
-                    item.projecao,
+                    item.prob ?? 0,
+                    item.projecao ?? 0,
                     item.odd ?? 0,
-                    item.confianca,
+                    item.confianca ?? 0,
                     item.scoreJarvis
                   )
                   const alerta = gerarAlerta(item.mercado, item.prob, item.confianca, item.scoreJarvis)

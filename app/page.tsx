@@ -32,7 +32,7 @@ const MAE_FG3M = 0.755
 
 type MarketKey = "winner" | "total" | "handicap" | "pts" | "ast" | "reb" | "fg3m"
 const PLAYER_LABELS: Record<Exclude<MarketKey, "winner" | "total" | "handicap">, string> = {
-  pts: "Pontos", ast: "Assists", reb: "Rebotes", fg3m: "3 Pontos",
+  pts: "Pontos", ast: "Assistências", reb: "Rebotes", fg3m: "Cestas de 3",
 }
 const MARKET_LABELS: Record<"winner" | "total" | "handicap", string> = {
   winner: "Vencedor", total: "Total", handicap: "Handicap",
@@ -53,6 +53,17 @@ type Sugestao = {
   scoreJarvis: number | null; confianca: number | null
   motivo: string; alerta: string | null; gameId: string | null
   playerId?: string; tipoJogo?: "winner" | "total" | "handicap"
+}
+
+type MultiplaSugestao = {
+  tipo: "Dupla" | "Tripla"
+  items: RankingItem[]
+  oddCombinada: number
+  probCombinada: number
+  evCombinado: number
+  scoreCombinado: number
+  motivo: string
+  alerta: string | null
 }
 
 // ── Helpers matemáticos ─────────────────────────────────
@@ -146,13 +157,13 @@ function gerarAlerta(mercado: string, prob: number, confianca: number | null, sc
 // ── Thresholds por mercado ──────────────────────────────
 function getThresholds(mercado: string): number[] {
   if (mercado === "Pontos") return THRESHOLDS_PTS
-  if (mercado === "Assists") return THRESHOLDS_AST
+  if (mercado === "Assists" || mercado === "Assistências") return THRESHOLDS_AST
   if (mercado === "Rebotes") return THRESHOLDS_REB
   return THRESHOLDS_FG3M
 }
 function getMae(mercado: string): number {
   if (mercado === "Pontos") return MAE_PTS
-  if (mercado === "Assists") return MAE_AST
+  if (mercado === "Assists" || mercado === "Assistências") return MAE_AST
   if (mercado === "Rebotes") return MAE_REB
   return MAE_FG3M
 }
@@ -172,7 +183,7 @@ export default function Home() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
   const [activeGameMarket, setActiveGameMarket] = useState<"winner" | "total" | "handicap">("winner")
   const [activePlayerMarket, setActivePlayerMarket] = useState<"pts" | "ast" | "reb" | "fg3m">("pts")
-  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "apostas">("jogos")
+  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "selecao" | "apostas">("jogos")
   const [loading, setLoading] = useState(true)
   const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
   const [sugestaoOdds, setSugestaoOdds] = useState<Record<string, { oddBanca?: number; linhaBanca?: number }>>({})
@@ -378,102 +389,108 @@ export default function Home() {
           probOver: getProbOver(row), 
           probUnder: getProbUnder(row) 
         }))
-
-        // Células rápidas da tabela (ex.: 10+ pontos, 5+ assistências).
-        // Elas entram no Ranking como valor identificado, mas NÃO são registradas como aposta.
-        const proj = getProjectionFromPlayer(row)
-        const conf = getModelConfidence(row)
-        const mae = getMae(source.mercado)
-        const thresholds = getThresholds(source.mercado)
-        if (proj != null) {
-          for (const threshold of thresholds) {
-            const cellKey = `${key}-${threshold}`
-            const oddBanca = thresholdOdds[cellKey]
-            if (!oddBanca || Number.isNaN(oddBanca)) continue
-
-            const prob = probOver(proj, threshold - 0.5, mae)
-            const ev = prob * oddBanca - 1
-            const scoreJarvis = calcularScoreJarvis(ev, prob, conf, source.mercado)
-
-            items.push({
-              key: cellKey,
-              categoria: "Jogador",
-              mercado: source.mercado,
-              titulo: row.player_name,
-              subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
-              lado: `${threshold}+`,
-              linha: threshold,
-              odd: oddBanca,
-              projecao: proj,
-              prob,
-              edge: prob - 1 / oddBanca,
-              ev,
-              confianca: conf,
-              scoreJarvis,
-            })
-          }
-        }
       }
     }
     return items
       .filter((x) => x.odd && x.ev !== null)
-      .sort((a, b) => {
-        const evDiff = (b.ev ?? -999) - (a.ev ?? -999)
-        if (Math.abs(evDiff) > 0.0001) return evDiff
+      .sort((a, b) =>
+        ((b.ev ?? -999) - (a.ev ?? -999)) ||
+        ((b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999)) ||
+        ((b.confianca ?? -999) - (a.confianca ?? -999)) ||
+        String(a.mercado).localeCompare(String(b.mercado))
+      )
+  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
 
-        const scoreDiff = (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999)
-        if (Math.abs(scoreDiff) > 0.0001) return scoreDiff
+  const selecionadasRanking = useMemo(() => {
+    return ranking.filter((r) => apostasParaRegistrar.has(r.key))
+  }, [ranking, apostasParaRegistrar])
 
-        const confDiff = (b.confianca ?? -999) - (a.confianca ?? -999)
-        if (Math.abs(confDiff) > 0.0001) return confDiff
-
-        return String(a.mercado).localeCompare(String(b.mercado))
-      })
-  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap, thresholdOdds])
-
-  // ── Sugestões de múltiplas ───────────────────────────────
+  // ── Sugestões de múltiplas — usa apenas a sua seleção ─────────
   const sugestoesMultiplas = useMemo(() => {
-    const confirmadas = ranking.filter((r) => (r.scoreJarvis ?? 0) >= 75 && r.prob >= 0.60)
-    const duplas: { items: RankingItem[]; oddCombinada: number; probCombinada: number }[] = []
-    const triplas: { items: RankingItem[]; oddCombinada: number; probCombinada: number }[] = []
-    
-    // Duplas — jogos diferentes para independência
-    for (let i = 0; i < confirmadas.length; i++) {
-      for (let j = i + 1; j < confirmadas.length; j++) {
-        const a = confirmadas[i], b = confirmadas[j]
-        // Extrair game_id do key
-        const gameIdA = a.key.split('-')[0]
-        const gameIdB = b.key.split('-')[0]
-        if (gameIdA === gameIdB) continue // mesmo jogo — não independente
-        const oddCombinada = parseFloat(((a.odd ?? 1) * (b.odd ?? 1)).toFixed(2))
-        const probCombinada = parseFloat((a.prob * b.prob).toFixed(4))
-        if (oddCombinada <= filtroOddMax)
-          duplas.push({ items: [a, b], oddCombinada, probCombinada })
+    const candidatas = selecionadasRanking.filter((r) =>
+      r.odd != null &&
+      r.prob != null &&
+      r.ev != null &&
+      (r.ev ?? -1) >= 0
+    )
+
+    function gameId(item: RankingItem): string | null {
+      return games.find((g) => item.key.includes(g.game_id))?.game_id ?? null
+    }
+
+    function baixaCorrelacao(items: RankingItem[]): boolean {
+      const jogos = items.map(gameId).filter(Boolean) as string[]
+      const jogosUnicos = new Set(jogos)
+      if (jogos.length !== jogosUnicos.size) return false
+
+      const jogadores = items
+        .filter((x) => x.categoria === "Jogador")
+        .map((x) => x.titulo)
+      if (jogadores.length !== new Set(jogadores).size) return false
+
+      return true
+    }
+
+    function montar(items: RankingItem[], tipo: "Dupla" | "Tripla"): MultiplaSugestao | null {
+      if (!baixaCorrelacao(items)) return null
+
+      const oddCombinada = parseFloat(items.reduce((acc, x) => acc * (x.odd ?? 1), 1).toFixed(2))
+      const probCombinada = parseFloat(items.reduce((acc, x) => acc * (x.prob ?? 0), 1).toFixed(4))
+      const evCombinado = parseFloat((probCombinada * oddCombinada - 1).toFixed(4))
+      const scoreMedio = items.reduce((acc, x) => acc + (x.scoreJarvis ?? 0), 0) / items.length
+      const confiancaMedia = items.reduce((acc, x) => acc + (x.confianca ?? 0), 0) / items.length
+      const mercados = new Set(items.map((x) => x.mercado)).size
+      const bonusDiversidade = mercados >= items.length ? 10 : mercados * 3
+      const scoreCombinado = Math.round(
+        (scoreMedio * 0.45) +
+        (confiancaMedia * 0.20) +
+        (probCombinada * 100 * 0.20) +
+        (Math.max(evCombinado, 0) * 100 * 0.10) +
+        bonusDiversidade
+      )
+
+      if (oddCombinada > filtroOddMax) return null
+      if (evCombinado < 0) return null
+
+      const motivo = `${tipo} montada apenas com apostas que você selecionou. O Jarvis evitou repetir jogo e jogador, combinando EV positivo, probabilidade combinada e diversidade de mercado.`
+      const alerta = probCombinada < 0.45
+        ? "Probabilidade combinada baixa — use stake reduzida."
+        : oddCombinada < 1.80
+          ? "Odd final conservadora — boa para compor odds baixas."
+          : null
+
+      return { tipo, items, oddCombinada, probCombinada, evCombinado, scoreCombinado, motivo, alerta }
+    }
+
+    const duplas: MultiplaSugestao[] = []
+    const triplas: MultiplaSugestao[] = []
+
+    for (let i = 0; i < candidatas.length; i++) {
+      for (let j = i + 1; j < candidatas.length; j++) {
+        const m = montar([candidatas[i], candidatas[j]], "Dupla")
+        if (m) duplas.push(m)
       }
     }
-    
-    // Triplas
-    for (let i = 0; i < confirmadas.length; i++) {
-      for (let j = i + 1; j < confirmadas.length; j++) {
-        for (let k = j + 1; k < confirmadas.length; k++) {
-          const a = confirmadas[i], b = confirmadas[j], c = confirmadas[k]
-          const gameIdA = a.key.split('-')[0]
-          const gameIdB = b.key.split('-')[0]
-          const gameIdC = c.key.split('-')[0]
-          if (gameIdA === gameIdB || gameIdB === gameIdC || gameIdA === gameIdC) continue
-          const oddCombinada = parseFloat(((a.odd ?? 1) * (b.odd ?? 1) * (c.odd ?? 1)).toFixed(2))
-          const probCombinada = parseFloat((a.prob * b.prob * c.prob).toFixed(4))
-          if (oddCombinada <= filtroOddMax)
-            triplas.push({ items: [a, b, c], oddCombinada, probCombinada })
+
+    for (let i = 0; i < candidatas.length; i++) {
+      for (let j = i + 1; j < candidatas.length; j++) {
+        for (let k = j + 1; k < candidatas.length; k++) {
+          const m = montar([candidatas[i], candidatas[j], candidatas[k]], "Tripla")
+          if (m) triplas.push(m)
         }
       }
     }
-    
-    duplas.sort((a, b) => b.probCombinada - a.probCombinada)
-    triplas.sort((a, b) => b.probCombinada - a.probCombinada)
-    
-    return { duplas: duplas.slice(0, 3), triplas: triplas.slice(0, 2) }
-  }, [ranking, filtroOddMax])
+
+    const ordenar = (a: MultiplaSugestao, b: MultiplaSugestao) =>
+      (b.scoreCombinado - a.scoreCombinado) ||
+      (b.evCombinado - a.evCombinado) ||
+      (b.probCombinada - a.probCombinada)
+
+    return {
+      duplas: duplas.sort(ordenar).slice(0, 5),
+      triplas: triplas.sort(ordenar).slice(0, 5),
+    }
+  }, [selecionadasRanking, filtroOddMax, games])
 
   // ── Dashboard de apostas ─────────────────────────────────
   const dashApostas = useMemo(() => {
@@ -496,13 +513,19 @@ export default function Home() {
   }, [apostas])
 
   // ── Ações ────────────────────────────────────────────────
-  function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
-    // Valor identificado NÃO é aposta registrada.
-    // Aqui apenas guardamos a odd da célula para ela aparecer no Ranking.
-    // Só vai para apostas_tracker quando você selecionar no Ranking e clicar em registrar.
-    setThresholdOdds((prev) => ({ ...prev, [cell.key]: oddBanca }))
+  async function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
+    setSalvando(true)
+    const ev = cell.prob * oddBanca - 1
+    await supabase.from("apostas_tracker").insert({
+      game_id: null, game_date: new Date().toISOString().split("T")[0],
+      liga: "NBA", mercado: cell.mercado, titulo: cell.titulo, subtitulo: cell.subtitulo,
+      lado: `${cell.threshold}+`, linha: cell.threshold, odd: oddBanca,
+      projecao: cell.projecao, prob: cell.prob, ev, score_jarvis: null,
+      confianca: null, stake: STAKE, resultado: null, lucro: null,
+    })
     setActiveCell(null)
-    setActiveSection("ranking")
+    await loadApostas()
+    setSalvando(false)
   }
 
   async function registrarRanking(item: RankingItem, jogoGameId: string | null) {
@@ -549,6 +572,39 @@ export default function Home() {
     }
     
     setApostasParaRegistrar(new Set())
+    await loadApostas()
+    setSalvando(false)
+  }
+
+
+  async function registrarMultipla(multipla: MultiplaSugestao) {
+    setSalvando(true)
+    const subtitulo = multipla.items.map((item) => `${item.titulo} ${item.lado} @${fn(item.odd, 2)}`).join(" | ")
+    const gameIds = multipla.items
+      .map((item) => games.find((g) => item.key.includes(g.game_id))?.game_id)
+      .filter(Boolean)
+      .join("+")
+
+    await supabase.from("apostas_tracker").insert({
+      game_id: gameIds || null,
+      game_date: new Date().toISOString().split("T")[0],
+      liga: "NBA",
+      mercado: `Múltipla ${multipla.tipo}`,
+      titulo: `${multipla.tipo} Jarvis @${multipla.oddCombinada}`,
+      subtitulo,
+      lado: "Combinação",
+      linha: null,
+      odd: multipla.oddCombinada,
+      projecao: null,
+      prob: multipla.probCombinada,
+      ev: multipla.evCombinado,
+      score_jarvis: multipla.scoreCombinado,
+      confianca: null,
+      stake: STAKE,
+      resultado: null,
+      lucro: null,
+    })
+
     await loadApostas()
     setSalvando(false)
   }
@@ -620,11 +676,12 @@ export default function Home() {
 
       {/* Nav */}
       <div style={S.nav}>
-        {(["jogos", "jogadores", "ranking", "apostas"] as const).map((s) => (
+        {(["jogos", "jogadores", "ranking", "selecao", "apostas"] as const).map((s) => (
           <button key={s} onClick={() => setActiveSection(s)}
             style={{ ...S.navBtn, ...(activeSection === s ? S.navBtnActive : {}) }}>
-            {s === "jogos" ? "⚡ Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : "Apostas"}
+            {s === "jogos" ? "⚡ Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : s === "selecao" ? "Seleção" : "Apostas"}
             {s === "ranking" && ranking.length > 0 && <span style={S.navBadge}>{ranking.length}</span>}
+            {s === "selecao" && apostasParaRegistrar.size > 0 && <span style={{ ...S.navBadge, background: C.green }}>{apostasParaRegistrar.size}</span>}
             {s === "apostas" && apostas.filter((a) => !a.resultado).length > 0 && <span style={{ ...S.navBadge, background: C.yellow }}>{apostas.filter((a) => !a.resultado).length}</span>}
           </button>
         ))}
@@ -872,7 +929,7 @@ export default function Home() {
                     {temValor && (
                       <button onClick={() => registrarThreshold(activeCell, ob)} disabled={salvando}
                         style={S.registerBtnReady}>
-                        ⚡ Adicionar ao Ranking — {activeCell.threshold}+ {activeCell.mercado}
+                        ⚡ Salvar no Ranking — {activeCell.threshold}+ {activeCell.mercado}
                       </button>
                     )}
                   </>
@@ -988,48 +1045,26 @@ export default function Home() {
       {/* ── RANKING ── */}
       {activeSection === "ranking" && (
         <div style={S.section}>
-          {/* Filtros */}
           <div style={S.filtrosRow}>
             <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Tipo</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {(["todas", "simples", "duplas", "triplas"] as const).map((t) => (
-                  <button key={t} onClick={() => setFiltroTipo(t)}
-                    style={{ ...S.filtroBtn, ...(filtroTipo === t ? S.filtroBtnActive : {}) }}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Odd máx</div>
-              <input type="number" step="0.1" value={filtroOddMax}
-                onChange={(e) => setFiltroOddMax(Number(e.target.value))}
-                style={{ ...S.playerInputSmall, width: 60 }} />
-            </div>
-            <div style={S.filtroGroup}>
               <div style={S.oddLabel}>Qtd</div>
-              <input type="number" step="1" min={1} max={20} value={filtroQtd}
+              <input type="number" step="1" min={1} max={30} value={filtroQtd}
                 onChange={(e) => setFiltroQtd(Number(e.target.value))}
                 style={{ ...S.playerInputSmall, width: 50 }} />
             </div>
           </div>
 
-          {/* Apostas Simples */}
-          {(filtroTipo === "todas" || filtroTipo === "simples") && ranking.length > 0 && (
+          {ranking.length > 0 ? (
             <div style={{ marginBottom: 16 }}>
               <div style={S.rankingSecaoTitulo}>
-                <span style={S.rankingSecaoLabel}>APOSTAS SIMPLES</span>
-                <span style={S.rankingSecaoCount}>{ranking.length} oportunidades</span>
+                <span style={S.rankingSecaoLabel}>RANKING DE VALOR</span>
+                <span style={S.rankingSecaoCount}>{ranking.length} oportunidades · escolha antes de registrar</span>
               </div>
               <div style={S.rankList}>
                 {ranking.slice(0, filtroQtd).map((item, i) => {
                   const jaReg = apostasJaRegistradas.has(`${item.titulo}-${item.lado}-${item.mercado}`)
                   const selecionado = apostasParaRegistrar.has(item.key)
-                  const jogo = games.find((g) => item.key.includes(g.game_id))
                   const scoreCor = semaforoScore(item.scoreJarvis)
-                  
-                  // Gerar motivo e alerta
                   const motivo = gerarMotivo(
                     item.mercado,
                     item.titulo,
@@ -1055,8 +1090,7 @@ export default function Home() {
                           <span style={S.rankMercado}>{item.mercado}</span>
                           <span style={S.rankSub}>{item.subtitulo}</span>
                         </div>
-                        
-                        {/* Motivo do Jarvis */}
+
                         <div style={S.motivoBox}>
                           <div style={S.motivoText}>{motivo}</div>
                           {alerta && <div style={S.alertaText}>⚠️ {alerta}</div>}
@@ -1067,20 +1101,19 @@ export default function Home() {
                           {item.linha != null && <span style={S.rankStat}><span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}</span>}
                           <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
                           <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
-                          <span style={S.rankStat}><span style={S.rankStatLabel}>Edge</span> {fn(item.edge, 3)}</span>
+                          <span style={S.rankStat}><span style={S.rankStatLabel}>Score</span> <span style={{ color: scoreCor }}>{fn(item.scoreJarvis, 0)}</span></span>
                         </div>
 
-                        {!jaReg && (
-                          <button 
+                        {!jaReg ? (
+                          <button
                             onClick={() => toggleApostaParaRegistrar(item.key)}
                             style={{
                               ...S.registerBtn,
                               ...(selecionado ? { background: C.gold, color: C.bg, fontWeight: 800 } : {})
                             }}>
-                            {selecionado ? "✓ Selecionada" : "📌 Selecionar"}
+                            {selecionado ? "✓ Na Seleção" : "📌 Adicionar à Seleção"}
                           </button>
-                        )}
-                        {jaReg && (
+                        ) : (
                           <div style={S.registerBtnDone}>✓ Já em Apostas feitas</div>
                         )}
                       </div>
@@ -1101,93 +1134,159 @@ export default function Home() {
                 })}
               </div>
             </div>
-          )}
-
-          {/* Apostas Duplas */}
-          {(filtroTipo === "todas" || filtroTipo === "duplas") && sugestoesMultiplas.duplas.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={S.rankingSecaoTitulo}>
-                <span style={S.rankingSecaoLabel}>APOSTAS DUPLAS</span>
-                <span style={S.rankingSecaoCount}>Top {sugestoesMultiplas.duplas.length}</span>
-              </div>
-              {sugestoesMultiplas.duplas.map((dupla, idx) => (
-                <div key={`dupla-${idx}`} style={S.multiplaCard}>
-                  <div style={S.multiplaHeader}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>DUPLA #{idx + 1}</span>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{dupla.oddCombinada}</span>
-                    <span style={{ fontSize: 11, color: semaforoProb(dupla.probCombinada) }}>
-                      {fp(dupla.probCombinada)} prob
-                    </span>
-                  </div>
-                  <div style={S.multiplaLegs}>
-                    {dupla.items.map((item, i) => (
-                      <div key={i} style={S.multiplaLeg}>
-                        <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
-                        <div style={S.multiplaLegDetalhe}>
-                          {item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Apostas Triplas */}
-          {(filtroTipo === "todas" || filtroTipo === "triplas") && sugestoesMultiplas.triplas.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={S.rankingSecaoTitulo}>
-                <span style={S.rankingSecaoLabel}>APOSTAS TRIPLAS</span>
-                <span style={S.rankingSecaoCount}>Top {sugestoesMultiplas.triplas.length}</span>
-              </div>
-              {sugestoesMultiplas.triplas.map((tripla, idx) => (
-                <div key={`tripla-${idx}`} style={S.multiplaCard}>
-                  <div style={S.multiplaHeader}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>TRIPLA #{idx + 1}</span>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{tripla.oddCombinada}</span>
-                    <span style={{ fontSize: 11, color: semaforoProb(tripla.probCombinada) }}>
-                      {fp(tripla.probCombinada)} prob
-                    </span>
-                  </div>
-                  <div style={S.multiplaLegs}>
-                    {tripla.items.map((item, i) => (
-                      <div key={i} style={S.multiplaLeg}>
-                        <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
-                        <div style={S.multiplaLegDetalhe}>
-                          {item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Botão de registrar selecionadas */}
-          {apostasParaRegistrar.size > 0 && (
-            <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000 }}>
-              <button 
-                onClick={registrarSelecionadas}
-                disabled={salvando}
-                style={{
-                  ...S.registerBtnReady,
-                  padding: "14px 28px",
-                  fontSize: 14,
-                  boxShadow: `0 4px 16px ${C.goldDim}`
-                }}>
-                ⚡ Registrar {apostasParaRegistrar.size} aposta{apostasParaRegistrar.size > 1 ? "s" : ""}
-              </button>
-            </div>
-          )}
-
-          {ranking.length === 0 && (
+          ) : (
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>⚡</div>
               <div style={S.emptyTitle}>Sem apostas calculadas</div>
               <div style={S.emptySub}>Preencha linhas e odds nos mercados para ver o ranking.</div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SELEÇÃO ── */}
+      {activeSection === "selecao" && (
+        <div style={S.section}>
+          <div style={S.rankingSecaoTitulo}>
+            <span style={S.rankingSecaoLabel}>MINHA SELEÇÃO</span>
+            <span style={S.rankingSecaoCount}>{selecionadasRanking.length} escolhidas para decidir</span>
+          </div>
+
+          {selecionadasRanking.length === 0 ? (
+            <div style={S.emptyRanking}>
+              <div style={S.emptyIcon}>📌</div>
+              <div style={S.emptyTitle}>Nenhuma aposta selecionada</div>
+              <div style={S.emptySub}>Vá ao Ranking e toque em “Adicionar à Seleção”. Depois o Jarvis monta simples e múltiplas aqui.</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ ...S.motivoBox, marginBottom: 12 }}>
+                <div style={S.motivoText}>
+                  Esta aba é a mesa de decisão: aqui ficam apenas as oportunidades que você escolheu. Você pode registrar apostas simples ou deixar o Jarvis sugerir múltiplas com baixa correlação.
+                </div>
+              </div>
+
+              <div style={S.filtrosRow}>
+                <div style={S.filtroGroup}>
+                  <div style={S.oddLabel}>Odd máx múltiplas</div>
+                  <input type="number" step="0.1" value={filtroOddMax}
+                    onChange={(e) => setFiltroOddMax(Number(e.target.value))}
+                    style={{ ...S.playerInputSmall, width: 70 }} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={S.rankingSecaoTitulo}>
+                  <span style={S.rankingSecaoLabel}>SIMPLES SELECIONADAS</span>
+                  <span style={S.rankingSecaoCount}>{selecionadasRanking.length}</span>
+                </div>
+                <div style={S.rankList}>
+                  {selecionadasRanking.map((item, i) => {
+                    const scoreCor = semaforoScore(item.scoreJarvis)
+                    return (
+                      <div key={item.key} style={S.rankRow}>
+                        <div style={S.rankPos}>#{i + 1}</div>
+                        <div style={S.rankInfo}>
+                          <div style={S.rankTitle}>{item.titulo}</div>
+                          <div style={S.rankMeta}>
+                            <span style={S.rankMercado}>{item.mercado}</span>
+                            <span style={S.rankSub}>{item.subtitulo}</span>
+                          </div>
+                          <div style={S.rankStats}>
+                            <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
+                            {item.linha != null && <span style={S.rankStat}><span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}</span>}
+                            <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
+                            <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
+                            <span style={S.rankStat}><span style={S.rankStatLabel}>EV</span> <span style={{ color: semaforoEv(item.ev) }}>{item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</span></span>
+                            <span style={S.rankStat}><span style={S.rankStatLabel}>Score</span> <span style={{ color: scoreCor }}>{fn(item.scoreJarvis, 0)}</span></span>
+                          </div>
+                          <button onClick={() => toggleApostaParaRegistrar(item.key)} style={S.registerBtn}>
+                            Remover da seleção
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <button
+                  onClick={registrarSelecionadas}
+                  disabled={salvando}
+                  style={{ ...S.registerBtnReady, marginTop: 12 }}>
+                  Registrar {selecionadasRanking.length} simples em Apostas feitas
+                </button>
+              </div>
+
+              {sugestoesMultiplas.duplas.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={S.rankingSecaoTitulo}>
+                    <span style={S.rankingSecaoLabel}>MÚLTIPLAS CONSERVADORAS</span>
+                    <span style={S.rankingSecaoCount}>Duplas sugeridas</span>
+                  </div>
+                  {sugestoesMultiplas.duplas.map((dupla, idx) => (
+                    <div key={`dupla-${idx}`} style={S.multiplaCard}>
+                      <div style={S.multiplaHeader}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>DUPLA #{idx + 1}</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{dupla.oddCombinada}</span>
+                        <span style={{ fontSize: 11, color: semaforoProb(dupla.probCombinada) }}>{fp(dupla.probCombinada)} prob</span>
+                        <span style={{ fontSize: 11, color: semaforoEv(dupla.evCombinado) }}>{dupla.evCombinado > 0 ? "+" : ""}{(dupla.evCombinado * 100).toFixed(1)}% EV</span>
+                        <span style={{ fontSize: 11, color: semaforoScore(dupla.scoreCombinado) }}>Score {dupla.scoreCombinado}</span>
+                      </div>
+                      <div style={S.motivoBox}>
+                        <div style={S.motivoText}>{dupla.motivo}</div>
+                        {dupla.alerta && <div style={S.alertaText}>⚠️ {dupla.alerta}</div>}
+                      </div>
+                      <div style={S.multiplaLegs}>
+                        {dupla.items.map((item, i) => (
+                          <div key={i} style={S.multiplaLeg}>
+                            <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
+                            <div style={S.multiplaLegDetalhe}>{item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)} · EV {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => registrarMultipla(dupla)} disabled={salvando} style={{ ...S.registerBtnReady, marginTop: 10 }}>
+                        Registrar esta dupla em Apostas feitas
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {sugestoesMultiplas.triplas.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={S.rankingSecaoTitulo}>
+                    <span style={S.rankingSecaoLabel}>MÚLTIPLAS MODERADAS</span>
+                    <span style={S.rankingSecaoCount}>Triplas sugeridas</span>
+                  </div>
+                  {sugestoesMultiplas.triplas.map((tripla, idx) => (
+                    <div key={`tripla-${idx}`} style={S.multiplaCard}>
+                      <div style={S.multiplaHeader}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>TRIPLA #{idx + 1}</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{tripla.oddCombinada}</span>
+                        <span style={{ fontSize: 11, color: semaforoProb(tripla.probCombinada) }}>{fp(tripla.probCombinada)} prob</span>
+                        <span style={{ fontSize: 11, color: semaforoEv(tripla.evCombinado) }}>{tripla.evCombinado > 0 ? "+" : ""}{(tripla.evCombinado * 100).toFixed(1)}% EV</span>
+                        <span style={{ fontSize: 11, color: semaforoScore(tripla.scoreCombinado) }}>Score {tripla.scoreCombinado}</span>
+                      </div>
+                      <div style={S.motivoBox}>
+                        <div style={S.motivoText}>{tripla.motivo}</div>
+                        {tripla.alerta && <div style={S.alertaText}>⚠️ {tripla.alerta}</div>}
+                      </div>
+                      <div style={S.multiplaLegs}>
+                        {tripla.items.map((item, i) => (
+                          <div key={i} style={S.multiplaLeg}>
+                            <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
+                            <div style={S.multiplaLegDetalhe}>{item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)} · EV {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => registrarMultipla(tripla)} disabled={salvando} style={{ ...S.registerBtnReady, marginTop: 10 }}>
+                        Registrar esta tripla em Apostas feitas
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -378,10 +378,58 @@ export default function Home() {
           probOver: getProbOver(row), 
           probUnder: getProbUnder(row) 
         }))
+
+        // Células rápidas da tabela (ex.: 10+ pontos, 5+ assistências).
+        // Elas entram no Ranking como valor identificado, mas NÃO são registradas como aposta.
+        const proj = getProjectionFromPlayer(row)
+        const conf = getModelConfidence(row)
+        const mae = getMae(source.mercado)
+        const thresholds = getThresholds(source.mercado)
+        if (proj != null) {
+          for (const threshold of thresholds) {
+            const cellKey = `${key}-${threshold}`
+            const oddBanca = thresholdOdds[cellKey]
+            if (!oddBanca || Number.isNaN(oddBanca)) continue
+
+            const prob = probOver(proj, threshold - 0.5, mae)
+            const ev = prob * oddBanca - 1
+            const scoreJarvis = calcularScoreJarvis(ev, prob, conf, source.mercado)
+
+            items.push({
+              key: cellKey,
+              categoria: "Jogador",
+              mercado: source.mercado,
+              titulo: row.player_name,
+              subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
+              lado: `${threshold}+`,
+              linha: threshold,
+              odd: oddBanca,
+              projecao: proj,
+              prob,
+              edge: prob - 1 / oddBanca,
+              ev,
+              confianca: conf,
+              scoreJarvis,
+            })
+          }
+        }
       }
     }
-    return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999))
-  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
+    return items
+      .filter((x) => x.odd && x.ev !== null)
+      .sort((a, b) => {
+        const evDiff = (b.ev ?? -999) - (a.ev ?? -999)
+        if (Math.abs(evDiff) > 0.0001) return evDiff
+
+        const scoreDiff = (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999)
+        if (Math.abs(scoreDiff) > 0.0001) return scoreDiff
+
+        const confDiff = (b.confianca ?? -999) - (a.confianca ?? -999)
+        if (Math.abs(confDiff) > 0.0001) return confDiff
+
+        return String(a.mercado).localeCompare(String(b.mercado))
+      })
+  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap, thresholdOdds])
 
   // ── Sugestões de múltiplas ───────────────────────────────
   const sugestoesMultiplas = useMemo(() => {
@@ -448,19 +496,13 @@ export default function Home() {
   }, [apostas])
 
   // ── Ações ────────────────────────────────────────────────
-  async function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
-    setSalvando(true)
-    const ev = cell.prob * oddBanca - 1
-    await supabase.from("apostas_tracker").insert({
-      game_id: null, game_date: new Date().toISOString().split("T")[0],
-      liga: "NBA", mercado: cell.mercado, titulo: cell.titulo, subtitulo: cell.subtitulo,
-      lado: `${cell.threshold}+`, linha: cell.threshold, odd: oddBanca,
-      projecao: cell.projecao, prob: cell.prob, ev, score_jarvis: null,
-      confianca: null, stake: STAKE, resultado: null, lucro: null,
-    })
+  function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
+    // Valor identificado NÃO é aposta registrada.
+    // Aqui apenas guardamos a odd da célula para ela aparecer no Ranking.
+    // Só vai para apostas_tracker quando você selecionar no Ranking e clicar em registrar.
+    setThresholdOdds((prev) => ({ ...prev, [cell.key]: oddBanca }))
     setActiveCell(null)
-    await loadApostas()
-    setSalvando(false)
+    setActiveSection("ranking")
   }
 
   async function registrarRanking(item: RankingItem, jogoGameId: string | null) {
@@ -830,7 +872,7 @@ export default function Home() {
                     {temValor && (
                       <button onClick={() => registrarThreshold(activeCell, ob)} disabled={salvando}
                         style={S.registerBtnReady}>
-                        ⚡ Salvar no Ranking — {activeCell.threshold}+ {activeCell.mercado}
+                        ⚡ Adicionar ao Ranking — {activeCell.threshold}+ {activeCell.mercado}
                       </button>
                     )}
                   </>
@@ -1039,7 +1081,7 @@ export default function Home() {
                           </button>
                         )}
                         {jaReg && (
-                          <div style={S.registerBtnDone}>✓ Já no Ranking</div>
+                          <div style={S.registerBtnDone}>✓ Já em Apostas feitas</div>
                         )}
                       </div>
                       <div style={S.rankEvCol}>

@@ -288,7 +288,7 @@ export default function Home() {
             ev, 
             confianca: conf, 
             scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor"),
-            linha: null
+            linha: undefined
           })
         }
         if (probFora != null && odds.oddAway) {
@@ -307,7 +307,7 @@ export default function Home() {
             ev, 
             confianca: conf, 
             scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor"),
-            linha: null
+            linha: undefined
           })
         }
       }
@@ -593,7 +593,7 @@ export default function Home() {
       titulo: `${multipla.tipo} Jarvis @${multipla.oddCombinada}`,
       subtitulo,
       lado: "Combinação",
-      linha: null,
+      linha: undefined,
       odd: multipla.oddCombinada,
       projecao: null,
       prob: multipla.probCombinada,

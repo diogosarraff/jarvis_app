@@ -1075,7 +1075,12 @@ export default function Home() {
                     item.confianca ?? 0,
                     item.scoreJarvis
                   )
-                  const alerta = gerarAlerta(item.mercado, item.prob, item.confianca, item.scoreJarvis)
+                  const alerta = gerarAlerta(
+                    item.mercado,
+                    item.prob ?? 0,
+                    item.confianca ?? 0,
+                    item.scoreJarvis ?? 0
+                  )
 
                   return (
                     <div key={item.key} style={{

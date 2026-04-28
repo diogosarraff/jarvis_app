@@ -175,17 +175,18 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "apostas">("jogos")
   const [loading, setLoading] = useState(true)
   const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
-  // Odds da banca para sugestões
   const [sugestaoOdds, setSugestaoOdds] = useState<Record<string, { oddBanca?: number; linhaBanca?: number }>>({})
-  // Odds da banca para células de threshold (key: `${playerKey}-${threshold}`)
   const [thresholdOdds, setThresholdOdds] = useState<Record<string, number>>({})
-  // Célula ativa no modo coluna
   const [activeCell, setActiveCell] = useState<{ key: string; threshold: number; prob: number; oddJustaVal: number; mercado: string; titulo: string; subtitulo: string; projecao: number } | null>(null)
   const [salvando, setSalvando] = useState(false)
-  // Filtros da tela de apostas
+  
+  // Filtros do Ranking (movidos de "Apostas")
   const [filtroTipo, setFiltroTipo] = useState<"simples" | "duplas" | "triplas" | "todas">("todas")
   const [filtroQtd, setFiltroQtd] = useState<number>(8)
   const [filtroOddMax, setFiltroOddMax] = useState<number>(3.0)
+  
+  // Apostas selecionadas para registro em lote
+  const [apostasParaRegistrar, setApostasParaRegistrar] = useState<Set<string>>(new Set())
 
   async function loadApostas() {
     const { data } = await supabase.from("apostas_tracker").select("*").order("created_at", { ascending: false })
@@ -240,7 +241,6 @@ export default function Home() {
       .filter((p) => String(p.game_id) === String(selectedGameId))
       .filter((p) => (getMinutesAverage(p) ?? 0) >= MIN_MINUTOS)
       .filter((p) => {
-        // Para cestas de 3: esconder jogadores que não tentam 3s
         if (activePlayerMarket === "fg3m") {
           const fg3aAvg = Number((p as any).player_fg3a_avg ?? 0)
           return fg3aAvg > 0.5
@@ -249,103 +249,6 @@ export default function Home() {
       })
       .sort((a, b) => (getProjectionFromPlayer(b) ?? 0) - (getProjectionFromPlayer(a) ?? 0))
   }, [selectedGameId, activePlayerMarket, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
-
-  // ── Sugestões automáticas ────────────────────────────────
-  const sugestoes = useMemo((): Sugestao[] => {
-    const items: Sugestao[] = []
-    const playerSources = [
-      { rows: playerPointsRows, mercado: "Pontos" },
-      { rows: playerAssistsRows, mercado: "Assistências" },
-      { rows: playerReboundsRows, mercado: "Rebotes" },
-      { rows: playerThreesRows, mercado: "Cestas de 3" },
-    ]
-    for (const source of playerSources) {
-      for (const row of source.rows) {
-        if ((getMinutesAverage(row) ?? 0) < MIN_MINUTOS) continue
-        const proj = getProjectionFromPlayer(row)
-        const probO = getProbOver(row)
-        const probU = getProbUnder(row)
-        const conf = getModelConfidence(row)
-        if (proj == null) continue
-        for (const [prob, lado] of [[probO, "Over"], [probU, "Under"]] as [number | null, string][]) {
-          if (prob == null || prob < 0.60) continue
-          const oj = oddJusta(prob)
-          const score = calcularScoreJarvis(prob * oj - 1, prob, conf, source.mercado)
-          if ((score ?? 0) < 75) continue
-          items.push({
-            key: `player-${source.mercado}-${row.game_id}-${row.player_id}-${lado}`,
-            mercado: source.mercado, titulo: row.player_name,
-            subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
-            lado, projecao: proj, prob, oddJusta: oj, scoreJarvis: score, confianca: conf,
-            motivo: gerarMotivo(source.mercado, row.player_name, lado, prob, proj, oj, conf, score),
-            alerta: gerarAlerta(source.mercado, prob, conf, score),
-            gameId: row.game_id, playerId: row.player_id,
-          })
-        }
-      }
-    }
-    // Mercados de jogo
-    for (const jogo of games) {
-      const winner = winnerRows.find((r) => String(r.game_id) === String(jogo.game_id))
-      if (winner) {
-        const { probCasa, probFora } = getProjectionFromGameWinner(winner)
-        const conf = getModelConfidence(winner)
-        for (const [prob, titulo, lado] of [
-          [probCasa, `${jogo.casa} ML`, jogo.casa],
-          [probFora, `${jogo.fora} ML`, jogo.fora],
-        ] as [number | null, string, string][]) {
-          if (prob == null || prob < 0.60) continue
-          const oj = oddJusta(prob)
-          const score = calcularScoreJarvis(prob * oj - 1, prob, conf, "Vencedor")
-          items.push({
-            key: `winner-${jogo.game_id}-${lado}`, mercado: "Vencedor", titulo,
-            subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado,
-            projecao: prob, prob, oddJusta: oj, scoreJarvis: score, confianca: conf,
-            motivo: gerarMotivo("Vencedor", titulo, lado, prob, prob, oj, conf, score),
-            alerta: gerarAlerta("Vencedor", prob, conf, score),
-            gameId: jogo.game_id, tipoJogo: "winner",
-          })
-        }
-      }
-      const total = totalRows.find((r) => String(r.game_id) === String(jogo.game_id))
-      if (total) {
-        const proj = getProjectionFromGameTotal(total)
-        const conf = getModelConfidence(total)
-        if (proj != null && (conf ?? 0) >= 35) {
-          const score = calcularScoreJarvis(0.05, 0.55, conf, "Total de Pontos")
-          items.push({
-            key: `total-${jogo.game_id}`, mercado: "Total de Pontos",
-            titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", lado: "—",
-            projecao: proj, prob: 0.55, oddJusta: parseFloat((1 / 0.55).toFixed(2)),
-            scoreJarvis: score, confianca: conf,
-            motivo: gerarMotivo("Total de Pontos", `${jogo.casa} vs ${jogo.fora}`, "—", 0.55, proj, 1.82, conf, score),
-            alerta: gerarAlerta("Total de Pontos", 0.55, conf, score),
-            gameId: jogo.game_id, tipoJogo: "total",
-          })
-        }
-      }
-      const handicap = handicapRows.find((r) => String(r.game_id) === String(jogo.game_id))
-      if (handicap) {
-        const proj = getProjectionFromGameHandicap(handicap)
-        const conf = getModelConfidence(handicap)
-        if (proj != null && (conf ?? 0) >= 40) {
-          const favorito = proj > 0 ? jogo.casa : jogo.fora
-          const score = calcularScoreJarvis(0.06, 0.58, conf, "Handicap")
-          items.push({
-            key: `handicap-${jogo.game_id}`, mercado: "Handicap",
-            titulo: `${jogo.casa} vs ${jogo.fora}`,
-            subtitulo: `Favorito: ${favorito} -${Math.abs(proj).toFixed(1)}`, lado: favorito,
-            projecao: proj, prob: 0.58, oddJusta: parseFloat((1 / 0.58).toFixed(2)),
-            scoreJarvis: score, confianca: conf,
-            motivo: gerarMotivo("Handicap", `${jogo.casa} vs ${jogo.fora}`, favorito, 0.58, proj, 1.72, conf, score),
-            alerta: gerarAlerta("Handicap", 0.58, conf, score),
-            gameId: jogo.game_id, tipoJogo: "handicap",
-          })
-        }
-      }
-    }
-    return items.sort((a, b) => (b.scoreJarvis ?? 0) - (a.scoreJarvis ?? 0)).slice(0, 8)
-  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
 
   // ── Ranking ─────────────────────────────────────────────
   const ranking = useMemo(() => {
@@ -360,20 +263,95 @@ export default function Home() {
         const conf = getModelConfidence(winner) ?? 0
         if (probCasa != null && odds.oddHome) {
           const ev = probCasa * odds.oddHome - 1
-          items.push({ key: `${jogo.game_id}-winner-home`, categoria: "Jogo", mercado: "Vencedor", titulo: `${jogo.casa} ML`, subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado: jogo.casa, odd: odds.oddHome, prob: probCasa, projecao: probCasa, edge: probCasa - 1 / odds.oddHome, ev, confianca: conf, scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor") })
+          items.push({ 
+            key: `${jogo.game_id}-winner-home`, 
+            categoria: "Jogo", 
+            mercado: "Vencedor", 
+            titulo: `${jogo.casa} ML`, 
+            subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
+            lado: jogo.casa, 
+            odd: odds.oddHome, 
+            prob: probCasa, 
+            projecao: probCasa, 
+            edge: probCasa - 1 / odds.oddHome, 
+            ev, 
+            confianca: conf, 
+            scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor"),
+            linha: null
+          })
         }
         if (probFora != null && odds.oddAway) {
           const ev = probFora * odds.oddAway - 1
-          items.push({ key: `${jogo.game_id}-winner-away`, categoria: "Jogo", mercado: "Vencedor", titulo: `${jogo.fora} ML`, subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado: jogo.fora, odd: odds.oddAway, prob: probFora, projecao: probFora, edge: probFora - 1 / odds.oddAway, ev, confianca: conf, scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor") })
+          items.push({ 
+            key: `${jogo.game_id}-winner-away`, 
+            categoria: "Jogo", 
+            mercado: "Vencedor", 
+            titulo: `${jogo.fora} ML`, 
+            subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
+            lado: jogo.fora, 
+            odd: odds.oddAway, 
+            prob: probFora, 
+            projecao: probFora, 
+            edge: probFora - 1 / odds.oddAway, 
+            ev, 
+            confianca: conf, 
+            scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor"),
+            linha: null
+          })
         }
       }
       if (total) {
         const odds = oddsMap[`total-${jogo.game_id}`] || {}
-        items.push(...getLineBetRankingItem({ keyBase: `total-${jogo.game_id}`, mercado: "Total de Pontos", titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", projecao: getProjectionFromGameTotal(total), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(total), probOver: null, probUnder: null, tipo: "total" }))
+        items.push(...getLineBetRankingItem({ 
+          keyBase: `total-${jogo.game_id}`, 
+          mercado: "Total de Pontos", 
+          titulo: `${jogo.casa} vs ${jogo.fora}`, 
+          subtitulo: "Mercado de jogos", 
+          projecao: getProjectionFromGameTotal(total), 
+          linha: odds.linha, 
+          oddOver: odds.oddOver, 
+          oddUnder: odds.oddUnder, 
+          modelConfidence: getModelConfidence(total), 
+          probOver: null, 
+          probUnder: null, 
+          tipo: "total" 
+        }))
       }
       if (handicap) {
         const odds = oddsMap[`handicap-${jogo.game_id}`] || {}
-        items.push(...getLineBetRankingItem({ keyBase: `handicap-${jogo.game_id}`, mercado: "Handicap", titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", projecao: getProjectionFromGameHandicap(handicap), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(handicap), probOver: null, probUnder: null, tipo: "handicap" }))
+        const proj = getProjectionFromGameHandicap(handicap)
+        const linhaInput = odds.linha
+        
+        // Para handicap, vamos ajustar o "lado" para mostrar a linha corretamente
+        const handicapItems = getLineBetRankingItem({ 
+          keyBase: `handicap-${jogo.game_id}`, 
+          mercado: "Handicap", 
+          titulo: `${jogo.casa} vs ${jogo.fora}`, 
+          subtitulo: "Mercado de jogos", 
+          projecao: proj, 
+          linha: linhaInput, 
+          oddOver: odds.oddOver, 
+          oddUnder: odds.oddUnder, 
+          modelConfidence: getModelConfidence(handicap), 
+          probOver: null, 
+          probUnder: null, 
+          tipo: "handicap" 
+        })
+        
+        // Ajustar o "lado" para mostrar a linha em vez de Over/Under
+        handicapItems.forEach(item => {
+          if (item.mercado === "Handicap" && item.linha != null) {
+            // Se é o favorito (linha negativa)
+            if (item.lado === "Over") {
+              item.lado = `-${Math.abs(item.linha).toFixed(1)}`
+            } else {
+              // Se é o azarão (linha positiva)
+              item.lado = `+${Math.abs(item.linha).toFixed(1)}`
+            }
+          }
+        })
+        
+        items.push(...handicapItems)
       }
     }
     const playerSources = [
@@ -387,11 +365,67 @@ export default function Home() {
         if ((getMinutesAverage(row) ?? 0) < MIN_MINUTOS) continue
         const key = `player-${source.mercado}-${row.game_id}-${row.player_id}`
         const odds = oddsMap[key] || {}
-        items.push(...getLineBetRankingItem({ keyBase: key, mercado: source.mercado, titulo: row.player_name, subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`, projecao: getProjectionFromPlayer(row), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(row), probOver: getProbOver(row), probUnder: getProbUnder(row) }))
+        items.push(...getLineBetRankingItem({ 
+          keyBase: key, 
+          mercado: source.mercado, 
+          titulo: row.player_name, 
+          subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`, 
+          projecao: getProjectionFromPlayer(row), 
+          linha: odds.linha, 
+          oddOver: odds.oddOver, 
+          oddUnder: odds.oddUnder, 
+          modelConfidence: getModelConfidence(row), 
+          probOver: getProbOver(row), 
+          probUnder: getProbUnder(row) 
+        }))
       }
     }
     return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999))
   }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
+
+  // ── Sugestões de múltiplas ───────────────────────────────
+  const sugestoesMultiplas = useMemo(() => {
+    const confirmadas = ranking.filter((r) => (r.scoreJarvis ?? 0) >= 75 && r.prob >= 0.60)
+    const duplas: { items: RankingItem[]; oddCombinada: number; probCombinada: number }[] = []
+    const triplas: { items: RankingItem[]; oddCombinada: number; probCombinada: number }[] = []
+    
+    // Duplas — jogos diferentes para independência
+    for (let i = 0; i < confirmadas.length; i++) {
+      for (let j = i + 1; j < confirmadas.length; j++) {
+        const a = confirmadas[i], b = confirmadas[j]
+        // Extrair game_id do key
+        const gameIdA = a.key.split('-')[0]
+        const gameIdB = b.key.split('-')[0]
+        if (gameIdA === gameIdB) continue // mesmo jogo — não independente
+        const oddCombinada = parseFloat(((a.odd ?? 1) * (b.odd ?? 1)).toFixed(2))
+        const probCombinada = parseFloat((a.prob * b.prob).toFixed(4))
+        if (oddCombinada <= filtroOddMax)
+          duplas.push({ items: [a, b], oddCombinada, probCombinada })
+      }
+    }
+    
+    // Triplas
+    for (let i = 0; i < confirmadas.length; i++) {
+      for (let j = i + 1; j < confirmadas.length; j++) {
+        for (let k = j + 1; k < confirmadas.length; k++) {
+          const a = confirmadas[i], b = confirmadas[j], c = confirmadas[k]
+          const gameIdA = a.key.split('-')[0]
+          const gameIdB = b.key.split('-')[0]
+          const gameIdC = c.key.split('-')[0]
+          if (gameIdA === gameIdB || gameIdB === gameIdC || gameIdA === gameIdC) continue
+          const oddCombinada = parseFloat(((a.odd ?? 1) * (b.odd ?? 1) * (c.odd ?? 1)).toFixed(2))
+          const probCombinada = parseFloat((a.prob * b.prob * c.prob).toFixed(4))
+          if (oddCombinada <= filtroOddMax)
+            triplas.push({ items: [a, b, c], oddCombinada, probCombinada })
+        }
+      }
+    }
+    
+    duplas.sort((a, b) => b.probCombinada - a.probCombinada)
+    triplas.sort((a, b) => b.probCombinada - a.probCombinada)
+    
+    return { duplas: duplas.slice(0, 3), triplas: triplas.slice(0, 2) }
+  }, [ranking, filtroOddMax])
 
   // ── Dashboard de apostas ─────────────────────────────────
   const dashApostas = useMemo(() => {
@@ -413,55 +447,7 @@ export default function Home() {
     return { total: apostas.length, greens, reds, pendentes: apostas.filter((a) => !a.resultado).length, stakeTotal, lucroTotal, roi, banca, winRate, mercados }
   }, [apostas])
 
-  // ── Sugestões de múltiplas ───────────────────────────────
-  const sugestoesMultiplas = useMemo(() => {
-    const confirmadas = sugestoes.filter((s) => (s.scoreJarvis ?? 0) >= 75 && s.prob >= 0.60)
-    const duplas: { a: Sugestao; b: Sugestao; oddCombinada: number; probCombinada: number }[] = []
-    const triplas: { a: Sugestao; b: Sugestao; c: Sugestao; oddCombinada: number; probCombinada: number }[] = []
-    // Duplas — jogos diferentes para independência
-    for (let i = 0; i < confirmadas.length; i++) {
-      for (let j = i + 1; j < confirmadas.length; j++) {
-        const a = confirmadas[i], b = confirmadas[j]
-        if (a.gameId === b.gameId) continue // mesmo jogo — não independente
-        const oddCombinada = parseFloat((a.oddJusta * b.oddJusta).toFixed(2))
-        const probCombinada = parseFloat((a.prob * b.prob).toFixed(4))
-        if (oddCombinada <= filtroOddMax)
-          duplas.push({ a, b, oddCombinada, probCombinada })
-      }
-    }
-    // Triplas
-    for (let i = 0; i < confirmadas.length; i++) {
-      for (let j = i + 1; j < confirmadas.length; j++) {
-        for (let k = j + 1; k < confirmadas.length; k++) {
-          const a = confirmadas[i], b = confirmadas[j], c = confirmadas[k]
-          if (a.gameId === b.gameId || b.gameId === c.gameId || a.gameId === c.gameId) continue
-          const oddCombinada = parseFloat((a.oddJusta * b.oddJusta * c.oddJusta).toFixed(2))
-          const probCombinada = parseFloat((a.prob * b.prob * c.prob).toFixed(4))
-          if (oddCombinada <= filtroOddMax)
-            triplas.push({ a, b, c, oddCombinada, probCombinada })
-        }
-      }
-    }
-    duplas.sort((a, b) => b.probCombinada - a.probCombinada)
-    triplas.sort((a, b) => b.probCombinada - a.probCombinada)
-    return { duplas: duplas.slice(0, 3), triplas: triplas.slice(0, 2) }
-  }, [sugestoes, filtroOddMax])
-
   // ── Ações ────────────────────────────────────────────────
-  async function registrarSugestao(s: Sugestao, oddBanca?: number, linhaBanca?: number) {
-    setSalvando(true)
-    const ev = oddBanca ? s.prob * oddBanca - 1 : null
-    await supabase.from("apostas_tracker").insert({
-      game_id: s.gameId, game_date: new Date().toISOString().split("T")[0],
-      liga: "NBA", mercado: s.mercado, titulo: s.titulo, subtitulo: s.subtitulo,
-      lado: s.lado, linha: linhaBanca ?? null, odd: oddBanca ?? null,
-      projecao: s.projecao, prob: s.prob, ev, score_jarvis: s.scoreJarvis,
-      confianca: s.confianca, stake: STAKE, resultado: null, lucro: null,
-    })
-    await loadApostas()
-    setSalvando(false)
-  }
-
   async function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
     setSalvando(true)
     const ev = cell.prob * oddBanca - 1
@@ -491,6 +477,40 @@ export default function Home() {
     setSalvando(false)
   }
 
+  async function registrarSelecionadas() {
+    if (apostasParaRegistrar.size === 0) return
+    setSalvando(true)
+    
+    const itensParaRegistrar = ranking.filter(item => apostasParaRegistrar.has(item.key))
+    
+    for (const item of itensParaRegistrar) {
+      const jogo = games.find((g) => item.key.includes(g.game_id))
+      await supabase.from("apostas_tracker").insert({
+        game_id: jogo?.game_id ?? null, 
+        game_date: new Date().toISOString().split("T")[0],
+        liga: "NBA", 
+        mercado: item.mercado, 
+        titulo: item.titulo, 
+        subtitulo: item.subtitulo,
+        lado: item.lado, 
+        linha: item.linha ?? null, 
+        odd: item.odd ?? null,
+        projecao: item.projecao, 
+        prob: item.prob, 
+        ev: item.ev,
+        score_jarvis: item.scoreJarvis, 
+        confianca: item.confianca,
+        stake: STAKE, 
+        resultado: null, 
+        lucro: null,
+      })
+    }
+    
+    setApostasParaRegistrar(new Set())
+    await loadApostas()
+    setSalvando(false)
+  }
+
   async function marcarResultado(id: string, resultado: "green" | "red", odd: number | null) {
     const lucro = resultado === "green" ? (odd ?? 0) * STAKE - STAKE : -STAKE
     await supabase.from("apostas_tracker").update({ resultado, lucro }).eq("id", id)
@@ -506,8 +526,16 @@ export default function Home() {
     setOddsMap((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) } }))
   }
 
-  function handleSugestaoOdds(key: string, field: "oddBanca" | "linhaBanca", value: string) {
-    setSugestaoOdds((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) } }))
+  function toggleApostaParaRegistrar(key: string) {
+    setApostasParaRegistrar(prev => {
+      const novo = new Set(prev)
+      if (novo.has(key)) {
+        novo.delete(key)
+      } else {
+        novo.add(key)
+      }
+      return novo
+    })
   }
 
   // ── Formatadores ─────────────────────────────────────────
@@ -694,7 +722,6 @@ export default function Home() {
             const spreadFav = proj != null ? `-${Math.abs(proj).toFixed(1)}` : ""
             const spreadAz = proj != null ? `+${Math.abs(proj).toFixed(1)}` : ""
 
-            // Calcular prob e odd justa para linha negativa (favorito)
             const linhaNeg = odds.linha ? -Math.abs(odds.linha) : null
             const linhaPos = odds.linha ? Math.abs(odds.linha) : null
             const pFav = linhaNeg && proj != null ? normalCDF(proj, Math.abs(linhaNeg), MAE_HANDICAP) : null
@@ -816,7 +843,6 @@ export default function Home() {
             ? <div style={S.empty}>Nenhum jogador encontrado.</div>
             : (
               <div style={S.tableContainer}>
-                {/* Cabeçalho da tabela */}
                 <div style={S.tableHeader}>
                   <div style={S.tableColPlayer}>Jogador</div>
                   <div style={S.tableColProj}>Proj</div>
@@ -826,7 +852,6 @@ export default function Home() {
                   <div style={S.tableColOutra}>Outra</div>
                 </div>
 
-                {/* Linhas dos jogadores */}
                 {playersForSelectedGame.map((player) => {
                   const mercadoLabel = PLAYER_LABELS[activePlayerMarket]
                   const proj = getProjectionFromPlayer(player) ?? 0
@@ -838,7 +863,6 @@ export default function Home() {
 
                   return (
                     <div key={playerKey} style={S.tableRow}>
-                      {/* Jogador */}
                       <div style={S.tableColPlayer}>
                         <div style={S.playerNameSmall}>{player.player_name}</div>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -851,18 +875,15 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* Projeção */}
                       <div style={S.tableColProj}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>{fn(proj, 1)}</span>
                       </div>
 
-                      {/* Células de threshold */}
                       {thresholds.map((t) => {
-                        const p = probOver(proj, t - 0.5, mae) // threshold -0.5 para capturar exato (ex: 15+ = superar 14.5)
+                        const p = probOver(proj, t - 0.5, mae)
                         const oj = oddJusta(p)
                         const cellKey = `${playerKey}-${t}`
                         const isActive = activeCell?.key === cellKey
-                        // Semáforo: verde se prob ≥ 65%, amarelo se ≥ 55%, vermelho se < 55%
                         const cellColor = p >= 0.65 ? C.green : p >= 0.55 ? C.yellow : C.red
                         return (
                           <div key={t} style={S.tableColThreshold}>
@@ -886,7 +907,6 @@ export default function Home() {
                         )
                       })}
 
-                      {/* Coluna Outra — linha customizável */}
                       <div style={S.tableColOutra}>
                         <input type="number" step="0.5" placeholder=",5"
                           value={odds.linha ?? ""}
@@ -926,54 +946,205 @@ export default function Home() {
       {/* ── RANKING ── */}
       {activeSection === "ranking" && (
         <div style={S.section}>
-          {ranking.length === 0 ? (
+          {/* Filtros */}
+          <div style={S.filtrosRow}>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Tipo</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {(["todas", "simples", "duplas", "triplas"] as const).map((t) => (
+                  <button key={t} onClick={() => setFiltroTipo(t)}
+                    style={{ ...S.filtroBtn, ...(filtroTipo === t ? S.filtroBtnActive : {}) }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Odd máx</div>
+              <input type="number" step="0.1" value={filtroOddMax}
+                onChange={(e) => setFiltroOddMax(Number(e.target.value))}
+                style={{ ...S.playerInputSmall, width: 60 }} />
+            </div>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Qtd</div>
+              <input type="number" step="1" min={1} max={20} value={filtroQtd}
+                onChange={(e) => setFiltroQtd(Number(e.target.value))}
+                style={{ ...S.playerInputSmall, width: 50 }} />
+            </div>
+          </div>
+
+          {/* Apostas Simples */}
+          {(filtroTipo === "todas" || filtroTipo === "simples") && ranking.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={S.rankingSecaoTitulo}>
+                <span style={S.rankingSecaoLabel}>APOSTAS SIMPLES</span>
+                <span style={S.rankingSecaoCount}>{ranking.length} oportunidades</span>
+              </div>
+              <div style={S.rankList}>
+                {ranking.slice(0, filtroQtd).map((item, i) => {
+                  const jaReg = apostasJaRegistradas.has(`${item.titulo}-${item.lado}-${item.mercado}`)
+                  const selecionado = apostasParaRegistrar.has(item.key)
+                  const jogo = games.find((g) => item.key.includes(g.game_id))
+                  const scoreCor = semaforoScore(item.scoreJarvis)
+                  
+                  // Gerar motivo e alerta
+                  const motivo = gerarMotivo(
+                    item.mercado,
+                    item.titulo,
+                    item.lado,
+                    item.prob,
+                    item.projecao,
+                    item.odd ?? 0,
+                    item.confianca,
+                    item.scoreJarvis
+                  )
+                  const alerta = gerarAlerta(item.mercado, item.prob, item.confianca, item.scoreJarvis)
+
+                  return (
+                    <div key={item.key} style={{
+                      ...S.rankRow,
+                      borderColor: selecionado ? C.gold : C.border,
+                      background: selecionado ? C.goldBg : C.surfaceRaised
+                    }}>
+                      <div style={S.rankPos}>#{i + 1}</div>
+                      <div style={S.rankInfo}>
+                        <div style={S.rankTitle}>{item.titulo}</div>
+                        <div style={S.rankMeta}>
+                          <span style={S.rankMercado}>{item.mercado}</span>
+                          <span style={S.rankSub}>{item.subtitulo}</span>
+                        </div>
+                        
+                        {/* Motivo do Jarvis */}
+                        <div style={S.motivoBox}>
+                          <div style={S.motivoText}>{motivo}</div>
+                          {alerta && <div style={S.alertaText}>⚠️ {alerta}</div>}
+                        </div>
+
+                        <div style={S.rankStats}>
+                          <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
+                          {item.linha != null && <span style={S.rankStat}><span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}</span>}
+                          <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
+                          <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
+                          <span style={S.rankStat}><span style={S.rankStatLabel}>Edge</span> {fn(item.edge, 3)}</span>
+                        </div>
+
+                        {!jaReg && (
+                          <button 
+                            onClick={() => toggleApostaParaRegistrar(item.key)}
+                            style={{
+                              ...S.registerBtn,
+                              ...(selecionado ? { background: C.gold, color: C.bg, fontWeight: 800 } : {})
+                            }}>
+                            {selecionado ? "✓ Selecionada" : "📌 Selecionar"}
+                          </button>
+                        )}
+                        {jaReg && (
+                          <div style={S.registerBtnDone}>✓ Já no Ranking</div>
+                        )}
+                      </div>
+                      <div style={S.rankEvCol}>
+                        <div style={{ ...S.rankEv, color: semaforoEv(item.ev) }}>
+                          {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
+                        </div>
+                        <div style={S.rankEvLabel}>EV</div>
+                        {item.scoreJarvis != null && (
+                          <div style={{ ...S.rankScoreBadge, borderColor: scoreCor + "44" }}>
+                            <span style={{ ...S.rankScoreValue, color: scoreCor }}>{item.scoreJarvis.toFixed(0)}</span>
+                            <span style={S.rankScoreLabel}>SCORE</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Apostas Duplas */}
+          {(filtroTipo === "todas" || filtroTipo === "duplas") && sugestoesMultiplas.duplas.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={S.rankingSecaoTitulo}>
+                <span style={S.rankingSecaoLabel}>APOSTAS DUPLAS</span>
+                <span style={S.rankingSecaoCount}>Top {sugestoesMultiplas.duplas.length}</span>
+              </div>
+              {sugestoesMultiplas.duplas.map((dupla, idx) => (
+                <div key={`dupla-${idx}`} style={S.multiplaCard}>
+                  <div style={S.multiplaHeader}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>DUPLA #{idx + 1}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{dupla.oddCombinada}</span>
+                    <span style={{ fontSize: 11, color: semaforoProb(dupla.probCombinada) }}>
+                      {fp(dupla.probCombinada)} prob
+                    </span>
+                  </div>
+                  <div style={S.multiplaLegs}>
+                    {dupla.items.map((item, i) => (
+                      <div key={i} style={S.multiplaLeg}>
+                        <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
+                        <div style={S.multiplaLegDetalhe}>
+                          {item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Apostas Triplas */}
+          {(filtroTipo === "todas" || filtroTipo === "triplas") && sugestoesMultiplas.triplas.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={S.rankingSecaoTitulo}>
+                <span style={S.rankingSecaoLabel}>APOSTAS TRIPLAS</span>
+                <span style={S.rankingSecaoCount}>Top {sugestoesMultiplas.triplas.length}</span>
+              </div>
+              {sugestoesMultiplas.triplas.map((tripla, idx) => (
+                <div key={`tripla-${idx}`} style={S.multiplaCard}>
+                  <div style={S.multiplaHeader}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>TRIPLA #{idx + 1}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{tripla.oddCombinada}</span>
+                    <span style={{ fontSize: 11, color: semaforoProb(tripla.probCombinada) }}>
+                      {fp(tripla.probCombinada)} prob
+                    </span>
+                  </div>
+                  <div style={S.multiplaLegs}>
+                    {tripla.items.map((item, i) => (
+                      <div key={i} style={S.multiplaLeg}>
+                        <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
+                        <div style={S.multiplaLegDetalhe}>
+                          {item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Botão de registrar selecionadas */}
+          {apostasParaRegistrar.size > 0 && (
+            <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000 }}>
+              <button 
+                onClick={registrarSelecionadas}
+                disabled={salvando}
+                style={{
+                  ...S.registerBtnReady,
+                  padding: "14px 28px",
+                  fontSize: 14,
+                  boxShadow: `0 4px 16px ${C.goldDim}`
+                }}>
+                ⚡ Registrar {apostasParaRegistrar.size} aposta{apostasParaRegistrar.size > 1 ? "s" : ""}
+              </button>
+            </div>
+          )}
+
+          {ranking.length === 0 && (
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>⚡</div>
               <div style={S.emptyTitle}>Sem apostas calculadas</div>
               <div style={S.emptySub}>Preencha linhas e odds nos mercados para ver o ranking.</div>
-            </div>
-          ) : (
-            <div style={S.rankList}>
-              {ranking.map((item, i) => {
-                const jaReg = apostasJaRegistradas.has(`${item.titulo}-${item.lado}-${item.mercado}`)
-                const jogo = games.find((g) => item.key.includes(g.game_id))
-                const scoreCor = semaforoScore(item.scoreJarvis)
-                return (
-                  <div key={item.key} style={S.rankRow}>
-                    <div style={S.rankPos}>#{i + 1}</div>
-                    <div style={S.rankInfo}>
-                      <div style={S.rankTitle}>{item.titulo}</div>
-                      <div style={S.rankMeta}>
-                        <span style={S.rankMercado}>{item.mercado}</span>
-                        <span style={S.rankSub}>{item.subtitulo}</span>
-                      </div>
-                      <div style={S.rankStats}>
-                        <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
-                        <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
-                        <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
-                        <span style={S.rankStat}><span style={S.rankStatLabel}>Edge</span> {fn(item.edge, 3)}</span>
-                      </div>
-                      <button onClick={() => !jaReg && registrarRanking(item, jogo?.game_id ?? null)}
-                        disabled={jaReg || salvando}
-                        style={{ ...S.registerBtn, ...(jaReg ? S.registerBtnDone : {}) }}>
-                        {jaReg ? "✓ No Ranking" : "📌 Salvar no Ranking"}
-                      </button>
-                    </div>
-                    <div style={S.rankEvCol}>
-                      <div style={{ ...S.rankEv, color: semaforoEv(item.ev) }}>
-                        {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
-                      </div>
-                      <div style={S.rankEvLabel}>EV</div>
-                      {item.scoreJarvis != null && (
-                        <div style={{ ...S.rankScoreBadge, borderColor: scoreCor + "44" }}>
-                          <span style={{ ...S.rankScoreValue, color: scoreCor }}>{item.scoreJarvis.toFixed(0)}</span>
-                          <span style={S.rankScoreLabel}>SCORE</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
             </div>
           )}
         </div>
@@ -1007,43 +1178,16 @@ export default function Home() {
             </div>
           )}
 
-          {/* Filtros */}
-          <div style={S.filtrosRow}>
-            <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Tipo</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {(["todas", "simples", "duplas", "triplas"] as const).map((t) => (
-                  <button key={t} onClick={() => setFiltroTipo(t)}
-                    style={{ ...S.filtroBtn, ...(filtroTipo === t ? S.filtroBtnActive : {}) }}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Odd máx</div>
-              <input type="number" step="0.1" value={filtroOddMax}
-                onChange={(e) => setFiltroOddMax(Number(e.target.value))}
-                style={{ ...S.playerInputSmall, width: 60 }} />
-            </div>
-            <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Qtd</div>
-              <input type="number" step="1" min={1} max={20} value={filtroQtd}
-                onChange={(e) => setFiltroQtd(Number(e.target.value))}
-                style={{ ...S.playerInputSmall, width: 50 }} />
-            </div>
-          </div>
-
           {/* Lista de apostas */}
           {apostas.length === 0 ? (
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>📋</div>
               <div style={S.emptyTitle}>Nenhuma aposta registrada</div>
-              <div style={S.emptySub}>Preencha linhas e odds nos mercados de Jogos e Jogadores para ver o ranking.</div>
+              <div style={S.emptySub}>Selecione apostas no Ranking para começar.</div>
             </div>
           ) : (
             <div style={S.apostasList}>
-              {apostas.slice(0, filtroQtd).map((aposta) => (
+              {apostas.map((aposta) => (
                 <div key={aposta.id} style={{
                   ...S.apostaCard,
                   borderColor: aposta.resultado === "green" ? C.green + "44"
@@ -1092,7 +1236,7 @@ export default function Home() {
 
 // ── Estilos ──────────────────────────────────────────────
 const styles: Record<string, React.CSSProperties> = {
-  root: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'SF Pro Display', 'Helvetica Neue', sans-serif", fontSize: 14, paddingBottom: 40 },
+  root: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'SF Pro Display', 'Helvetica Neue', sans-serif", fontSize: 14, paddingBottom: 80 },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 12px", borderBottom: `1px solid ${C.border2}`, background: C.surface },
   headerLeft: { display: "flex", alignItems: "center", gap: 10 },
   logo: { display: "flex", alignItems: "baseline", gap: 2 },
@@ -1114,42 +1258,6 @@ const styles: Record<string, React.CSSProperties> = {
   navBtnActive: { color: C.gold },
   navBadge: { fontSize: 9, fontWeight: 700, color: C.bg, background: C.gold, borderRadius: 10, padding: "1px 4px", minWidth: 14, textAlign: "center" as any },
   section: { padding: "12px 12px 0" },
-
-  // Sugestões
-  sugestaoHeader: { marginBottom: 12 },
-  sugestaoTitle: { fontSize: 16, fontWeight: 800, color: C.gold, marginBottom: 2 },
-  sugestaoSub: { fontSize: 11, color: C.textMuted },
-  sugestaoList: { display: "flex", flexDirection: "column" as any, gap: 10 },
-  sugestaoCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 14, padding: 14, transition: "border-color 0.2s, box-shadow 0.2s" },
-  sugestaoTop: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" as any },
-  sugestaoRank: { fontSize: 11, fontWeight: 800, color: C.goldDim, minWidth: 20 },
-  sugestaoSide: { fontSize: 11, fontWeight: 600, color: C.textMuted },
-  sugestaoNome: { fontSize: 15, fontWeight: 800, color: C.white, marginBottom: 2 },
-  sugestaoSubtitulo: { fontSize: 11, color: C.textMuted, marginBottom: 10 },
-  scorePill: { fontSize: 10, fontWeight: 800, marginLeft: "auto", border: "1px solid", borderRadius: 4, padding: "1px 5px" },
-  sugestaoMetrics: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 },
-  metricBlock: { background: C.surface2, borderRadius: 8, padding: "6px 8px", textAlign: "center" as any },
-  metricLabel: { fontSize: 9, color: C.textMuted, fontWeight: 600, letterSpacing: "0.5px", marginBottom: 2 },
-  metricVal: { fontSize: 13, fontWeight: 800, color: C.text },
-  motivoBox: { background: C.surface2, borderRadius: 8, padding: "8px 10px", marginBottom: 10 },
-  motivoText: { fontSize: 11, color: C.textMuted, lineHeight: 1.5 },
-  alertaText: { fontSize: 10, color: C.yellow, marginTop: 4, lineHeight: 1.4 },
-  sugestaoInputRow: { display: "flex", gap: 8, marginBottom: 8 },
-  sugestaoInputGroup: { flex: 1, display: "flex", flexDirection: "column" as any, gap: 4 },
-  semValorBox: { padding: "10px 12px", background: C.redBg + "22", border: `1px solid ${C.red}44`, borderRadius: 8, color: C.red, fontSize: 12, fontWeight: 700, textAlign: "center" as any, marginBottom: 4 },
-  registerBtn: { width: "100%", padding: "9px", background: C.goldBg, border: `1px solid ${C.goldDim}`, borderRadius: 8, color: C.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "center" as any },
-  registerBtnDone: { background: C.greenBg + "22", border: `1px solid ${C.green}44`, color: C.green, cursor: "default" },
-  registerBtnReady: { width: "100%", padding: "9px", background: C.gold, border: `1px solid ${C.goldLight}`, borderRadius: 8, color: C.bg, fontWeight: 800, cursor: "pointer", textAlign: "center" as any, fontSize: 12 },
-
-  // Múltiplas
-  multiplaSection: { marginTop: 12, padding: "12px 0 0" },
-  multiplaTitle: { fontSize: 14, fontWeight: 800, color: C.gold, marginBottom: 4 },
-  multiplaCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "10px 12px", marginTop: 8 },
-  multiplaHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
-  multiplaLegs: { display: "flex", flexDirection: "column" as any, gap: 4 },
-  multiplaLeg: { display: "flex", flexDirection: "column" as any, padding: "4px 8px", background: C.surface2, borderRadius: 6 },
-  multiplaLegNome: { fontSize: 11, fontWeight: 700, color: C.text },
-  multiplaLegDetalhe: { fontSize: 10, color: C.textMuted },
 
   // Jogos
   marketTabs: { display: "flex", gap: 6, marginBottom: 10 },
@@ -1204,16 +1312,33 @@ const styles: Record<string, React.CSSProperties> = {
   // Modal de célula ativa
   cellModal: { background: C.surfaceRaised, border: `1px solid ${C.gold}`, borderRadius: 12, padding: 14, marginBottom: 10, boxShadow: `0 0 16px ${C.goldDim}` },
   cellModalHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 },
+  metricBlock: { background: C.surface2, borderRadius: 8, padding: "6px 8px", textAlign: "center" as any },
+  metricLabel: { fontSize: 9, color: C.textMuted, fontWeight: 600, letterSpacing: "0.5px", marginBottom: 2 },
+  metricVal: { fontSize: 13, fontWeight: 800, color: C.text },
 
   // Ranking
-  rankList: { display: "flex", flexDirection: "column" as any, gap: 6 },
-  rankRow: { display: "flex", alignItems: "flex-start", gap: 10, background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px" },
+  filtrosRow: { display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" as any },
+  filtroGroup: { display: "flex", flexDirection: "column" as any, gap: 4 },
+  filtroBtn: { padding: "4px 8px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textMuted, fontSize: 10, fontWeight: 600, cursor: "pointer" },
+  filtroBtnActive: { background: C.goldBg, border: `1px solid ${C.gold}`, color: C.gold },
+  
+  rankingSecaoTitulo: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "8px 0" },
+  rankingSecaoLabel: { fontSize: 12, fontWeight: 800, color: C.gold, letterSpacing: "1.5px" },
+  rankingSecaoCount: { fontSize: 10, fontWeight: 600, color: C.textMuted },
+  
+  rankList: { display: "flex", flexDirection: "column" as any, gap: 8 },
+  rankRow: { display: "flex", alignItems: "flex-start", gap: 10, background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.2s" },
   rankPos: { fontSize: 11, fontWeight: 800, color: C.goldDim, minWidth: 24, paddingTop: 2 },
   rankInfo: { flex: 1, minWidth: 0 },
   rankTitle: { fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as any },
-  rankMeta: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6 },
+  rankMeta: { display: "flex", gap: 6, alignItems: "center", marginBottom: 8 },
   rankMercado: { fontSize: 9, fontWeight: 700, color: C.bg, background: C.gold, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase" as any },
   rankSub: { fontSize: 10, color: C.textMuted },
+  
+  motivoBox: { background: C.surface2, borderRadius: 8, padding: "8px 10px", marginBottom: 10 },
+  motivoText: { fontSize: 11, color: C.textMuted, lineHeight: 1.5 },
+  alertaText: { fontSize: 10, color: C.yellow, marginTop: 4, lineHeight: 1.4 },
+  
   rankStats: { display: "flex", gap: 8, flexWrap: "wrap" as any, marginBottom: 8 },
   rankStat: { fontSize: 11, color: C.textMuted },
   rankStatLabel: { color: C.textDim, marginRight: 2 },
@@ -1224,11 +1349,19 @@ const styles: Record<string, React.CSSProperties> = {
   rankScoreValue: { fontSize: 15, fontWeight: 800 },
   rankScoreLabel: { fontSize: 8, fontWeight: 700, color: C.textDim, letterSpacing: "1px" },
 
+  registerBtn: { width: "100%", padding: "9px", background: C.goldBg, border: `1px solid ${C.goldDim}`, borderRadius: 8, color: C.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "center" as any, transition: "all 0.2s" },
+  registerBtnDone: { width: "100%", padding: "9px", background: C.greenBg + "22", border: `1px solid ${C.green}44`, borderRadius: 8, color: C.green, fontSize: 12, fontWeight: 600, textAlign: "center" as any },
+  registerBtnReady: { width: "100%", padding: "9px", background: C.gold, border: `1px solid ${C.goldLight}`, borderRadius: 8, color: C.bg, fontWeight: 800, cursor: "pointer", textAlign: "center" as any, fontSize: 12, transition: "all 0.2s" },
+
+  // Múltiplas
+  multiplaCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 },
+  multiplaHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" as any },
+  multiplaLegs: { display: "flex", flexDirection: "column" as any, gap: 4 },
+  multiplaLeg: { display: "flex", flexDirection: "column" as any, padding: "4px 8px", background: C.surface2, borderRadius: 6 },
+  multiplaLegNome: { fontSize: 11, fontWeight: 700, color: C.text },
+  multiplaLegDetalhe: { fontSize: 10, color: C.textMuted },
+
   // Apostas
-  filtrosRow: { display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 10, flexWrap: "wrap" as any },
-  filtroGroup: { display: "flex", flexDirection: "column" as any, gap: 4 },
-  filtroBtn: { padding: "4px 8px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textMuted, fontSize: 10, fontWeight: 600, cursor: "pointer" },
-  filtroBtnActive: { background: C.goldBg, border: `1px solid ${C.gold}`, color: C.gold },
   dashGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 },
   dashCard: { background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 8px", textAlign: "center" as any },
   dashValue: { fontSize: 14, fontWeight: 800, color: C.gold, marginBottom: 2 },
@@ -1259,8 +1392,4 @@ const styles: Record<string, React.CSSProperties> = {
   emptyIcon: { fontSize: 32, marginBottom: 12 },
   emptyTitle: { fontSize: 15, fontWeight: 700, color: C.gold, marginBottom: 6 },
   emptySub: { fontSize: 12, color: C.textMuted, lineHeight: 1.6 },
-
-  // Player info (usado em jogadores e ranking)
-  playerMeta: { display: "flex", gap: 6, alignItems: "center" },
-  playerVs: { fontSize: 10, color: C.textMuted },
 }

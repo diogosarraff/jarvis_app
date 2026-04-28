@@ -172,7 +172,7 @@ export default function Home() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
   const [activeGameMarket, setActiveGameMarket] = useState<"winner" | "total" | "handicap">("winner")
   const [activePlayerMarket, setActivePlayerMarket] = useState<"pts" | "ast" | "reb" | "fg3m">("pts")
-  const [activeSection, setActiveSection] = useState<"sugestoes" | "jogos" | "jogadores" | "ranking" | "apostas">("sugestoes")
+  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "apostas">("jogos")
   const [loading, setLoading] = useState(true)
   const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
   // Odds da banca para sugestões
@@ -239,6 +239,14 @@ export default function Home() {
     return source
       .filter((p) => String(p.game_id) === String(selectedGameId))
       .filter((p) => (getMinutesAverage(p) ?? 0) >= MIN_MINUTOS)
+      .filter((p) => {
+        // Para cestas de 3: esconder jogadores que não tentam 3s
+        if (activePlayerMarket === "fg3m") {
+          const fg3aAvg = Number((p as any).player_fg3a_avg ?? 0)
+          return fg3aAvg > 0.5
+        }
+        return true
+      })
       .sort((a, b) => (getProjectionFromPlayer(b) ?? 0) - (getProjectionFromPlayer(a) ?? 0))
   }, [selectedGameId, activePlayerMarket, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
 
@@ -542,191 +550,15 @@ export default function Home() {
 
       {/* Nav */}
       <div style={S.nav}>
-        {(["sugestoes", "jogos", "jogadores", "ranking", "apostas"] as const).map((s) => (
+        {(["jogos", "jogadores", "ranking", "apostas"] as const).map((s) => (
           <button key={s} onClick={() => setActiveSection(s)}
             style={{ ...S.navBtn, ...(activeSection === s ? S.navBtnActive : {}) }}>
-            {s === "sugestoes" ? "⚡" : s === "jogos" ? "Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : "Apostas"}
-            {s === "sugestoes" && sugestoes.length > 0 && <span style={{ ...S.navBadge, background: C.gold }}>{sugestoes.length}</span>}
+            {s === "jogos" ? "⚡ Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : "Apostas"}
             {s === "ranking" && ranking.length > 0 && <span style={S.navBadge}>{ranking.length}</span>}
             {s === "apostas" && apostas.filter((a) => !a.resultado).length > 0 && <span style={{ ...S.navBadge, background: C.yellow }}>{apostas.filter((a) => !a.resultado).length}</span>}
           </button>
         ))}
       </div>
-
-      {/* ── SUGESTÕES ── */}
-      {activeSection === "sugestoes" && (
-        <div style={S.section}>
-          <div style={S.sugestaoHeader}>
-            <div style={S.sugestaoTitle}>Apostas do Dia</div>
-            <div style={S.sugestaoSub}>Selecionadas automaticamente · Score ≥ 75 · Prob ≥ 60% · Min ≥ {MIN_MINUTOS}min</div>
-          </div>
-
-          {loading ? <div style={S.empty}>Carregando...</div>
-            : sugestoes.length === 0 ? (
-              <div style={S.emptyRanking}>
-                <div style={S.emptyIcon}>🔍</div>
-                <div style={S.emptyTitle}>Nenhuma sugestão hoje</div>
-                <div style={S.emptySub}>O Jarvis não encontrou apostas com confiança suficiente.</div>
-              </div>
-            ) : (
-              <div style={S.sugestaoList}>
-                {sugestoes.map((s, i) => {
-                  const jaReg = apostasJaRegistradas.has(`${s.titulo}-${s.lado}-${s.mercado}`)
-                  const sOdds = sugestaoOdds[s.key] || {}
-                  const evBanca = sOdds.oddBanca ? s.prob * sOdds.oddBanca - 1 : null
-                  const valorConfirmado = evBanca != null && evBanca > 0
-                  const precisaLinha = s.mercado === "Total de Pontos" || s.mercado === "Handicap"
-                  const scoreCor = semaforoScore(s.scoreJarvis)
-
-                  return (
-                    <div key={s.key} style={{
-                      ...S.sugestaoCard,
-                      borderColor: jaReg ? "#22c55e44" : valorConfirmado ? C.gold : C.border2,
-                      boxShadow: valorConfirmado ? `0 0 12px ${C.goldDim}` : "none",
-                    }}>
-                      {/* Rank + mercado */}
-                      <div style={S.sugestaoTop}>
-                        <div style={S.sugestaoRank}>#{i + 1}</div>
-                        <span style={S.rankMercado}>{s.mercado}</span>
-                        <span style={S.sugestaoSide}>{s.lado !== "—" ? s.lado : ""}</span>
-                        {s.scoreJarvis != null && (
-                          <span style={{ ...S.scorePill, color: scoreCor, borderColor: scoreCor + "44" }}>
-                            Score {s.scoreJarvis.toFixed(0)}
-                          </span>
-                        )}
-                      </div>
-                      <div style={S.sugestaoNome}>{s.titulo}</div>
-                      <div style={S.sugestaoSubtitulo}>{s.subtitulo}</div>
-
-                      {/* Métricas com semáforo */}
-                      <div style={S.sugestaoMetrics}>
-                        <div style={S.metricBlock}>
-                          <div style={S.metricLabel}>Prob</div>
-                          <div style={{ ...S.metricVal, color: semaforoProb(s.prob) }}>{fp(s.prob)}</div>
-                        </div>
-                        <div style={S.metricBlock}>
-                          <div style={S.metricLabel}>Odd Justa</div>
-                          <div style={{ ...S.metricVal, color: C.gold }}>{s.oddJusta.toFixed(2)}</div>
-                        </div>
-                        {s.projecao != null && s.mercado !== "Vencedor" && (
-                          <div style={S.metricBlock}>
-                            <div style={S.metricLabel}>Projeção</div>
-                            <div style={S.metricVal}>{fn(s.projecao, 1)}</div>
-                          </div>
-                        )}
-                        {s.confianca != null && (
-                          <div style={S.metricBlock}>
-                            <div style={S.metricLabel}>Conf</div>
-                            <div style={{ ...S.metricVal, color: semaforoConf(s.confianca) }}>{fn(s.confianca, 0)}</div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Motivo — SEMPRE visível */}
-                      <div style={S.motivoBox}>
-                        <div style={S.motivoText}>{s.motivo}</div>
-                        {s.alerta && <div style={S.alertaText}>⚠️ {s.alerta}</div>}
-                      </div>
-
-                      {/* Input odds da banca */}
-                      <div style={S.sugestaoInputRow}>
-                        {precisaLinha && (
-                          <div style={S.sugestaoInputGroup}>
-                            <div style={S.oddLabel}>Linha banca</div>
-                            <input type="number" step="0.5" placeholder="Ex: 221.5"
-                              value={sOdds.linhaBanca ?? ""}
-                              onChange={(e) => handleSugestaoOdds(s.key, "linhaBanca", e.target.value)}
-                              style={S.oddInput} />
-                          </div>
-                        )}
-                        <div style={S.sugestaoInputGroup}>
-                          <div style={S.oddLabel}>Odd banca (mín: {s.oddJusta.toFixed(2)})</div>
-                          <input type="number" step="0.01" placeholder={s.oddJusta.toFixed(2)}
-                            value={sOdds.oddBanca ?? ""}
-                            onChange={(e) => handleSugestaoOdds(s.key, "oddBanca", e.target.value)}
-                            style={{
-                              ...S.oddInput,
-                              borderColor: sOdds.oddBanca
-                                ? sOdds.oddBanca >= s.oddJusta ? C.green : C.red
-                                : C.border2,
-                            }} />
-                          {sOdds.oddBanca && (
-                            <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: sOdds.oddBanca >= s.oddJusta ? C.green : C.red }}>
-                              {sOdds.oddBanca >= s.oddJusta
-                                ? `✓ Valor confirmado · EV ${evBanca != null ? `+${(evBanca * 100).toFixed(1)}%` : ""}`
-                                : `✗ Sem valor · Odd mínima: ${s.oddJusta.toFixed(2)}`}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Sem valor */}
-                      {sOdds.oddBanca && !valorConfirmado && (
-                        <div style={S.semValorBox}>❌ Sem valor — banca paga menos que o justo. Não apostar.</div>
-                      )}
-
-                      {/* Botão registrar */}
-                      {(!sOdds.oddBanca || valorConfirmado) && (
-                        <button onClick={() => !jaReg && registrarSugestao(s, sOdds.oddBanca, sOdds.linhaBanca)}
-                          disabled={jaReg || salvando}
-                          style={{ ...S.registerBtn, ...(jaReg ? S.registerBtnDone : valorConfirmado ? S.registerBtnReady : {}) }}>
-                          {jaReg ? "✓ Registrada" : salvando ? "Salvando..." : valorConfirmado ? "⚡ Registrar — Valor Confirmado" : "+ Registrar aposta"}
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-
-                {/* Múltiplas sugeridas */}
-                {(sugestoesMultiplas.duplas.length > 0 || sugestoesMultiplas.triplas.length > 0) && (
-                  <div style={S.multiplaSection}>
-                    <div style={S.multiplaTitle}>🔗 Sugestões de Múltiplas</div>
-                    <div style={S.sugestaoSub}>Combinações de apostas independentes com valor</div>
-
-                    {sugestoesMultiplas.duplas.map((d, i) => (
-                      <div key={`dupla-${i}`} style={S.multiplaCard}>
-                        <div style={S.multiplaHeader}>
-                          <span style={{ ...S.rankMercado, background: "#1d4ed8" }}>DUPLA</span>
-                          <span style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>Odd: {d.oddCombinada.toFixed(2)}</span>
-                          <span style={{ fontSize: 11, color: semaforoProb(d.probCombinada) }}>Prob: {fp(d.probCombinada)}</span>
-                        </div>
-                        <div style={S.multiplaLegs}>
-                          <div style={S.multiplaLeg}>
-                            <span style={S.multiplaLegNome}>{d.a.titulo}</span>
-                            <span style={S.multiplaLegDetalhe}>{d.a.mercado} · {d.a.lado} · {d.a.oddJusta.toFixed(2)}</span>
-                          </div>
-                          <div style={{ color: C.goldDim, fontSize: 11, alignSelf: "center" }}>+</div>
-                          <div style={S.multiplaLeg}>
-                            <span style={S.multiplaLegNome}>{d.b.titulo}</span>
-                            <span style={S.multiplaLegDetalhe}>{d.b.mercado} · {d.b.lado} · {d.b.oddJusta.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {sugestoesMultiplas.triplas.map((t, i) => (
-                      <div key={`tripla-${i}`} style={S.multiplaCard}>
-                        <div style={S.multiplaHeader}>
-                          <span style={{ ...S.rankMercado, background: "#7c3aed" }}>TRIPLA</span>
-                          <span style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>Odd: {t.oddCombinada.toFixed(2)}</span>
-                          <span style={{ fontSize: 11, color: semaforoProb(t.probCombinada) }}>Prob: {fp(t.probCombinada)}</span>
-                        </div>
-                        <div style={S.multiplaLegs}>
-                          {[t.a, t.b, t.c].map((leg, j) => (
-                            <div key={j} style={S.multiplaLeg}>
-                              <span style={S.multiplaLegNome}>{leg.titulo}</span>
-                              <span style={S.multiplaLegDetalhe}>{leg.mercado} · {leg.lado} · {leg.oddJusta.toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-        </div>
-      )}
 
       {/* ── JOGOS ── */}
       {activeSection === "jogos" && selectedGame && (
@@ -857,15 +689,21 @@ export default function Home() {
             const conf = getModelConfidence(handicapRow)
             const key = `handicap-${selectedGame.game_id}`
             const odds = oddsMap[key] || {}
-            const evOver = odds.linha && odds.oddOver && proj != null ? calcularEvOver(proj, odds.linha, odds.oddOver, "handicap") : null
-            const evUnder = odds.linha && odds.oddUnder && proj != null ? calcularEvUnder(proj, odds.linha, odds.oddUnder, "handicap") : null
-            const pOver = odds.linha && proj != null ? normalCDF(proj, odds.linha, MAE_HANDICAP) : null
-            const pUnder = odds.linha && proj != null ? 1 - normalCDF(proj, odds.linha, MAE_HANDICAP) : null
-            const ojOver = pOver ? parseFloat((1 / pOver).toFixed(2)) : null
-            const ojUnder = pUnder ? parseFloat((1 / pUnder).toFixed(2)) : null
             const favorito = proj != null ? (proj > 0 ? selectedGame.casa : selectedGame.fora) : "—"
-            const spreadCasa = proj != null ? (proj > 0 ? `-${Math.abs(proj).toFixed(1)}` : `+${Math.abs(proj).toFixed(1)}`) : ""
-            const spreadFora = proj != null ? (proj < 0 ? `-${Math.abs(proj).toFixed(1)}` : `+${Math.abs(proj).toFixed(1)}`) : ""
+            const azarao = proj != null ? (proj > 0 ? selectedGame.fora : selectedGame.casa) : "—"
+            const spreadFav = proj != null ? `-${Math.abs(proj).toFixed(1)}` : ""
+            const spreadAz = proj != null ? `+${Math.abs(proj).toFixed(1)}` : ""
+
+            // Calcular prob e odd justa para linha negativa (favorito)
+            const linhaNeg = odds.linha ? -Math.abs(odds.linha) : null
+            const linhaPos = odds.linha ? Math.abs(odds.linha) : null
+            const pFav = linhaNeg && proj != null ? normalCDF(proj, Math.abs(linhaNeg), MAE_HANDICAP) : null
+            const pAz = linhaPos && proj != null ? 1 - normalCDF(proj, linhaPos, MAE_HANDICAP) : null
+            const ojFav = pFav ? parseFloat((1 / pFav).toFixed(2)) : null
+            const ojAz = pAz ? parseFloat((1 / pAz).toFixed(2)) : null
+            const evFav = pFav && odds.oddOver ? pFav * odds.oddOver - 1 : null
+            const evAz = pAz && odds.oddUnder ? pAz * odds.oddUnder - 1 : null
+
             return (
               <div style={S.card}>
                 <div style={S.cardHeader}>
@@ -873,34 +711,34 @@ export default function Home() {
                   {conf != null && <span style={{ ...S.confBadge, color: semaforoConf(conf) }}>Conf {fn(conf, 0)}</span>}
                 </div>
                 <div style={S.projCenter}>
-                  <div style={S.projBig}>{proj != null ? `-${Math.abs(proj).toFixed(1)}` : "—"}</div>
-                  <div style={S.projSub}>Favorito: <strong style={{ color: C.gold }}>{favorito}</strong></div>
+                  <div style={S.projBig}>{spreadFav}</div>
+                  <div style={S.projSub}>Favorito Jarvis: <strong style={{ color: C.gold }}>{favorito}</strong></div>
                 </div>
                 <div style={S.lineRow}>
-                  <input type="number" step="0.5" placeholder="Linha da banca"
+                  <input type="number" step="0.5" placeholder="Linha (ex: 9.5)"
                     value={odds.linha ?? ""} onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                     style={{ ...S.oddInput, flex: 1 }} />
                 </div>
-                {ojOver && ojUnder && (
+                {ojFav && ojAz && (
                   <div style={S.oddJustaRow}>
-                    <span style={S.oddJustaItem}>{selectedGame.casa} — Odd justa: <strong style={{ color: C.gold }}>{ojOver}</strong></span>
-                    <span style={S.oddJustaItem}>{selectedGame.fora} — Odd justa: <strong style={{ color: C.gold }}>{ojUnder}</strong></span>
+                    <span style={S.oddJustaItem}>{favorito} {linhaNeg?.toFixed(1)} — OJ: <strong style={{ color: C.gold }}>{ojFav}</strong></span>
+                    <span style={S.oddJustaItem}>{azarao} +{linhaPos?.toFixed(1)} — OJ: <strong style={{ color: C.gold }}>{ojAz}</strong></span>
                   </div>
                 )}
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
-                    <div style={S.oddLabel}>{selectedGame.casa} {spreadCasa} {ojOver ? `(mín ${ojOver})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
+                    <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
+                    <input type="number" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojOver ? (odds.oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
-                    {evOver != null && <div style={{ ...S.evTag, color: semaforoEv(evOver) }}>EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%</div>}
+                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojFav ? (odds.oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
+                    {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
-                    <div style={S.oddLabel}>{selectedGame.fora} {spreadFora} {ojUnder ? `(mín ${ojUnder})` : ""}</div>
-                    <input type="number" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
+                    <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
+                    <input type="number" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojUnder ? (odds.oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
-                    {evUnder != null && <div style={{ ...S.evTag, color: semaforoEv(evUnder) }}>EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%</div>}
+                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojAz ? (odds.oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
+                    {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
               </div>
@@ -965,7 +803,7 @@ export default function Home() {
                     {temValor && (
                       <button onClick={() => registrarThreshold(activeCell, ob)} disabled={salvando}
                         style={S.registerBtnReady}>
-                        ⚡ Registrar — {activeCell.threshold}+ {activeCell.mercado}
+                        ⚡ Salvar no Ranking — {activeCell.threshold}+ {activeCell.mercado}
                       </button>
                     )}
                   </>
@@ -1118,7 +956,7 @@ export default function Home() {
                       <button onClick={() => !jaReg && registrarRanking(item, jogo?.game_id ?? null)}
                         disabled={jaReg || salvando}
                         style={{ ...S.registerBtn, ...(jaReg ? S.registerBtnDone : {}) }}>
-                        {jaReg ? "✓ Registrada" : "+ Registrar aposta"}
+                        {jaReg ? "✓ No Ranking" : "📌 Salvar no Ranking"}
                       </button>
                     </div>
                     <div style={S.rankEvCol}>
@@ -1201,7 +1039,7 @@ export default function Home() {
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>📋</div>
               <div style={S.emptyTitle}>Nenhuma aposta registrada</div>
-              <div style={S.emptySub}>Vá às Sugestões e clique em Registrar para começar.</div>
+              <div style={S.emptySub}>Preencha linhas e odds nos mercados de Jogos e Jogadores para ver o ranking.</div>
             </div>
           ) : (
             <div style={S.apostasList}>

@@ -863,9 +863,10 @@ export default function Home() {
             const pAz = linhaPos && proj != null ? 1 - normalCDF(proj, linhaPos, MAE_HANDICAP) : null
             const ojFav = pFav ? parseFloat((1 / pFav).toFixed(2)) : null
             const ojAz = pAz ? parseFloat((1 / pAz).toFixed(2)) : null
-
-          const evFav = pFav && ojFav ? pFav * ojFav - 1 : null
-          const evAz = pAz && ojAz ? pAz * ojAz - 1 : null
+            const oddOver = toNumber(odds.oddOver)
+            const oddUnder = toNumber(odds.oddUnder)
+            const evFav = pFav && oddOver ? pFav * oddOver - 1 : null
+            const evAz = pAz && oddUnder ? pAz * oddUnder - 1 : null
 
             return (
               <div style={S.card}>
@@ -893,30 +894,14 @@ export default function Home() {
                     <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{
-                        ...S.oddInput,
-                        borderColor:
-                          toNum(odds.oddOver) && ojFav
-                            ? toNum(odds.oddOver)! >= ojFav
-                              ? C.green
-                              : C.red
-                            : C.border2,
-                       }}
+                      style={{ ...S.oddInput, borderColor: oddOver && ojFav ? (oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
                     {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{
-                       ...S.oddInput,
-                       borderColor:
-                         toNum(odds.oddUnder) && ojAz
-                           ? toNum(odds.oddUnder)! >= ojAz
-                             ? C.green
-                             : C.red
-                           : C.border2,
-                       }}
+                      style={{ ...S.oddInput, borderColor: oddUnder && ojAz ? (oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
                     {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -1013,6 +998,7 @@ export default function Home() {
                   const thresholds = getThresholds(mercadoLabel)
                   const playerKey = `player-${mercadoLabel}-${player.game_id}-${player.player_id}`
                   const odds = oddsMap[playerKey] || {}
+                  const linha = toNumber(odds.linha)
 
                   return (
                     <div key={playerKey} style={S.tableRow}>
@@ -1070,6 +1056,8 @@ export default function Home() {
                           const pU = getProbUnder(player)
                           const ojO = pO ? parseFloat((1 / pO).toFixed(2)) : null
                           const ojU = pU ? parseFloat((1 / pU).toFixed(2)) : null
+                          const oddOver = toNumber(odds.oddOver)
+                          const oddUnder = toNumber(odds.oddUnder)
                           return (
                             <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
                               <div style={{ flex: 1 }}>

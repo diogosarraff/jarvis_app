@@ -189,7 +189,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [oddsMap, setOddsMap] = useState<Record<string, any>>({})
   const [sugestaoOdds, setSugestaoOdds] = useState<Record<string, { oddBanca?: number; linhaBanca?: number }>>({})
-  const [thresholdOdds, setThresholdOdds] = useState<Record<string, number>>({})
+  const [thresholdOdds, setThresholdOdds] = useState<Record<string, string>>({})
   const [activeCell, setActiveCell] = useState<{ key: string; threshold: number; prob: number; oddJustaVal: number; mercado: string; titulo: string; subtitulo: string; projecao: number } | null>(null)
   const [salvando, setSalvando] = useState(false)
   
@@ -273,9 +273,11 @@ export default function Home() {
       if (winner) {
         const { probCasa, probFora } = getProjectionFromGameWinner(winner)
         const odds = oddsMap[`winner-${jogo.game_id}`] || {}
+        const oddHome = toNumber(odds.oddHome)
+        const oddAway = toNumber(odds.oddAway)
         const conf = getModelConfidence(winner) ?? 0
-        if (probCasa != null && odds.oddHome) {
-          const ev = probCasa * odds.oddHome - 1
+        if (probCasa != null && oddHome) {
+          const ev = probCasa * oddHome - 1
           items.push({ 
             key: `${jogo.game_id}-winner-home`, 
             categoria: "Jogo", 
@@ -283,18 +285,18 @@ export default function Home() {
             titulo: `${jogo.casa} ML`, 
             subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
             lado: jogo.casa, 
-            odd: odds.oddHome, 
+            odd: oddHome, 
             prob: probCasa, 
             projecao: probCasa, 
-            edge: probCasa - 1 / odds.oddHome, 
+            edge: probCasa - 1 / oddHome, 
             ev, 
             confianca: conf, 
             scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor"),
             linha: undefined
           })
         }
-        if (probFora != null && odds.oddAway) {
-          const ev = probFora * odds.oddAway - 1
+        if (probFora != null && oddAway) {
+          const ev = probFora * oddAway - 1
           items.push({ 
             key: `${jogo.game_id}-winner-away`, 
             categoria: "Jogo", 
@@ -302,10 +304,10 @@ export default function Home() {
             titulo: `${jogo.fora} ML`, 
             subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
             lado: jogo.fora, 
-            odd: odds.oddAway, 
+            odd: oddAway, 
             prob: probFora, 
             projecao: probFora, 
-            edge: probFora - 1 / odds.oddAway, 
+            edge: probFora - 1 / oddAway, 
             ev, 
             confianca: conf, 
             scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor"),
@@ -315,15 +317,18 @@ export default function Home() {
       }
       if (total) {
         const odds = oddsMap[`total-${jogo.game_id}`] || {}
+        const linha = toNumber(odds.linha)
+        const oddOver = toNumber(odds.oddOver)
+        const oddUnder = toNumber(odds.oddUnder)
         items.push(...getLineBetRankingItem({ 
           keyBase: `total-${jogo.game_id}`, 
           mercado: "Total de Pontos", 
           titulo: `${jogo.casa} vs ${jogo.fora}`, 
           subtitulo: "Mercado de jogos", 
           projecao: getProjectionFromGameTotal(total), 
-          linha: odds.linha, 
-          oddOver: odds.oddOver, 
-          oddUnder: odds.oddUnder, 
+          linha, 
+          oddOver, 
+          oddUnder, 
           modelConfidence: getModelConfidence(total), 
           probOver: null, 
           probUnder: null, 
@@ -333,7 +338,9 @@ export default function Home() {
       if (handicap) {
         const odds = oddsMap[`handicap-${jogo.game_id}`] || {}
         const proj = getProjectionFromGameHandicap(handicap)
-        const linhaInput = odds.linha
+        const linhaInput = toNumber(odds.linha)
+        const oddOver = toNumber(odds.oddOver)
+        const oddUnder = toNumber(odds.oddUnder)
         
         // Para handicap, vamos ajustar o "lado" para mostrar a linha corretamente
         const handicapItems = getLineBetRankingItem({ 
@@ -343,8 +350,8 @@ export default function Home() {
           subtitulo: "Mercado de jogos", 
           projecao: proj, 
           linha: linhaInput, 
-          oddOver: odds.oddOver, 
-          oddUnder: odds.oddUnder, 
+          oddOver, 
+          oddUnder, 
           modelConfidence: getModelConfidence(handicap), 
           probOver: null, 
           probUnder: null, 
@@ -378,15 +385,18 @@ export default function Home() {
         if ((getMinutesAverage(row) ?? 0) < MIN_MINUTOS) continue
         const key = `player-${source.mercado}-${row.game_id}-${row.player_id}`
         const odds = oddsMap[key] || {}
+        const linha = toNumber(odds.linha)
+        const oddOver = toNumber(odds.oddOver)
+        const oddUnder = toNumber(odds.oddUnder)
         items.push(...getLineBetRankingItem({ 
           keyBase: key, 
           mercado: source.mercado, 
           titulo: row.player_name, 
           subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`, 
           projecao: getProjectionFromPlayer(row), 
-          linha: odds.linha, 
-          oddOver: odds.oddOver, 
-          oddUnder: odds.oddUnder, 
+          linha, 
+          oddOver, 
+          oddUnder, 
           modelConfidence: getModelConfidence(row), 
           probOver: getProbOver(row), 
           probUnder: getProbUnder(row) 
@@ -626,13 +636,21 @@ export default function Home() {
     return value.replace(",", ".")
   }
 
+  function toNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === "") return undefined
+    const normalizado = String(value).replace(",", ".")
+    const n = Number(normalizado)
+    return Number.isFinite(n) ? n : undefined
+  }
+
   function handleOddsChange(key: string, field: keyof OddsInput, value: string) {
-    const valorNormalizado = normalizarEntradaDecimal(value)
+    // Mantém exatamente o que o usuário digitou, inclusive vírgula.
+    // A conversão para número acontece só nos cálculos, via toNumber().
     setOddsMap((prev) => ({
       ...prev,
       [key]: {
         ...prev[key],
-        [field]: valorNormalizado === "" ? undefined : valorNormalizado,
+        [field]: value,
       },
     }))
   }
@@ -717,8 +735,10 @@ export default function Home() {
             const conf = getModelConfidence(winnerRow)
             const key = `winner-${selectedGame.game_id}`
             const odds = oddsMap[key] || {}
-            const evHome = probCasa != null && odds.oddHome ? probCasa * odds.oddHome - 1 : null
-            const evAway = probFora != null && odds.oddAway ? probFora * odds.oddAway - 1 : null
+            const oddHome = toNumber(odds.oddHome)
+            const oddAway = toNumber(odds.oddAway)
+            const evHome = probCasa != null && oddHome ? probCasa * oddHome - 1 : null
+            const evAway = probFora != null && oddAway ? probFora * oddAway - 1 : null
             const ojCasa = probCasa ? parseFloat((1 / probCasa).toFixed(2)) : null
             const ojFora = probFora ? parseFloat((1 / probFora).toFixed(2)) : null
             const favorito = probCasa != null && probFora != null ? (probCasa >= probFora ? selectedGame.casa : selectedGame.fora) : null
@@ -757,14 +777,14 @@ export default function Home() {
                     <div style={S.oddLabel}>{selectedGame.casa} (mín {ojCasa ?? "—"})</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojCasa?.toString() ?? "Odd"}
                       value={odds.oddHome ?? ""} onChange={(e) => handleOddsChange(key, "oddHome", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddHome && ojCasa ? (odds.oddHome >= ojCasa ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddHome && ojCasa ? (oddHome >= ojCasa ? C.green : C.red) : C.border2 }} />
                     {evHome != null && <div style={{ ...S.evTag, color: semaforoEv(evHome) }}>EV {evHome > 0 ? "+" : ""}{(evHome * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{selectedGame.fora} (mín {ojFora ?? "—"})</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojFora?.toString() ?? "Odd"}
                       value={odds.oddAway ?? ""} onChange={(e) => handleOddsChange(key, "oddAway", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddAway && ojFora ? (odds.oddAway >= ojFora ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddAway && ojFora ? (oddAway >= ojFora ? C.green : C.red) : C.border2 }} />
                     {evAway != null && <div style={{ ...S.evTag, color: semaforoEv(evAway) }}>EV {evAway > 0 ? "+" : ""}{(evAway * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -777,10 +797,13 @@ export default function Home() {
             const conf = getModelConfidence(totalRow)
             const key = `total-${selectedGame.game_id}`
             const odds = oddsMap[key] || {}
-            const evOver = odds.linha && odds.oddOver && proj != null ? calcularEvOver(proj, odds.linha, odds.oddOver, "total") : null
-            const evUnder = odds.linha && odds.oddUnder && proj != null ? calcularEvUnder(proj, odds.linha, odds.oddUnder, "total") : null
-            const pOver = odds.linha && proj != null ? 1 - normalCDF(odds.linha, proj, MAE_TOTAL) : null
-            const pUnder = odds.linha && proj != null ? normalCDF(odds.linha, proj, MAE_TOTAL) : null
+            const linha = toNumber(odds.linha)
+            const oddOver = toNumber(odds.oddOver)
+            const oddUnder = toNumber(odds.oddUnder)
+            const evOver = linha && oddOver && proj != null ? calcularEvOver(proj, linha, oddOver, "total") : null
+            const evUnder = linha && oddUnder && proj != null ? calcularEvUnder(proj, linha, oddUnder, "total") : null
+            const pOver = linha && proj != null ? 1 - normalCDF(linha, proj, MAE_TOTAL) : null
+            const pUnder = linha && proj != null ? normalCDF(linha, proj, MAE_TOTAL) : null
             const ojOver = pOver ? parseFloat((1 / pOver).toFixed(2)) : null
             const ojUnder = pUnder ? parseFloat((1 / pUnder).toFixed(2)) : null
             return (
@@ -809,14 +832,14 @@ export default function Home() {
                     <div style={S.oddLabel}>Over {ojOver ? `(mín ${ojOver})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojOver ? (odds.oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddOver && ojOver ? (oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
                     {evOver != null && <div style={{ ...S.evTag, color: semaforoEv(evOver) }}>EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>Under {ojUnder ? `(mín ${ojUnder})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojUnder ? (odds.oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddUnder && ojUnder ? (oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
                     {evUnder != null && <div style={{ ...S.evTag, color: semaforoEv(evUnder) }}>EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -840,8 +863,8 @@ export default function Home() {
             const pAz = linhaPos && proj != null ? 1 - normalCDF(proj, linhaPos, MAE_HANDICAP) : null
             const ojFav = pFav ? parseFloat((1 / pFav).toFixed(2)) : null
             const ojAz = pAz ? parseFloat((1 / pAz).toFixed(2)) : null
-            const evFav = pFav && odds.oddOver ? pFav * odds.oddOver - 1 : null
-            const evAz = pAz && odds.oddUnder ? pAz * odds.oddUnder - 1 : null
+            const evFav = pFav && oddOver ? pFav * oddOver - 1 : null
+            const evAz = pAz && oddUnder ? pAz * oddUnder - 1 : null
 
             return (
               <div style={S.card}>
@@ -869,14 +892,14 @@ export default function Home() {
                     <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojFav ? (odds.oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddOver && ojFav ? (oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
                     {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojAz ? (odds.oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: oddUnder && ojAz ? (oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
                     {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -926,10 +949,11 @@ export default function Home() {
               <div style={S.oddLabel}>Odd da banca (mín: {activeCell.oddJustaVal.toFixed(2)})</div>
               <input type="text" inputMode="decimal" step="0.01" placeholder={activeCell.oddJustaVal.toFixed(2)}
                 value={thresholdOdds[activeCell.key] ?? ""}
-                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: Number(normalizarEntradaDecimal(e.target.value)) }))}
+                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: e.target.value }))}
                 style={{ ...S.oddInput, marginBottom: 8, marginTop: 4 }} />
-              {thresholdOdds[activeCell.key] != null && (() => {
-                const ob = thresholdOdds[activeCell.key]
+              {thresholdOdds[activeCell.key] !== undefined && thresholdOdds[activeCell.key] !== "" && (() => {
+                const ob = toNumber(thresholdOdds[activeCell.key])
+                if (!ob) return null
                 const ev = activeCell.prob * ob - 1
                 const temValor = ob >= activeCell.oddJustaVal
                 return (
@@ -1024,7 +1048,7 @@ export default function Home() {
                           value={odds.linha ?? ""}
                           onChange={(e) => handleOddsChange(playerKey, "linha", e.target.value)}
                           style={{ ...S.playerInputSmall, width: "100%" }} />
-                        {odds.linha && (() => {
+                        {linha && (() => {
                           const pO = getProbOver(player)
                           const pU = getProbUnder(player)
                           const ojO = pO ? parseFloat((1 / pO).toFixed(2)) : null
@@ -1035,13 +1059,13 @@ export default function Home() {
                                 <input type="text" inputMode="decimal" step="0.01" placeholder={ojO?.toString() ?? "Over"}
                                   value={odds.oddOver ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddOver", e.target.value)}
-                                  style={{ ...S.playerInputSmall, borderColor: odds.oddOver && ojO ? (odds.oddOver >= ojO ? C.green : C.red) : C.border2 }} />
+                                  style={{ ...S.playerInputSmall, borderColor: oddOver && ojO ? (oddOver >= ojO ? C.green : C.red) : C.border2 }} />
                               </div>
                               <div style={{ flex: 1 }}>
                                 <input type="text" inputMode="decimal" step="0.01" placeholder={ojU?.toString() ?? "Und"}
                                   value={odds.oddUnder ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddUnder", e.target.value)}
-                                  style={{ ...S.playerInputSmall, borderColor: odds.oddUnder && ojU ? (odds.oddUnder >= ojU ? C.green : C.red) : C.border2 }} />
+                                  style={{ ...S.playerInputSmall, borderColor: oddUnder && ojU ? (oddUnder >= ojU ? C.green : C.red) : C.border2 }} />
                               </div>
                             </div>
                           )

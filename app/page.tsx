@@ -893,14 +893,30 @@ export default function Home() {
                     <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddOver && ojFav ? (oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
+                      style={{
+                        ...S.oddInput,
+                        borderColor:
+                          toNum(odds.oddOver) && ojFav
+                            ? toNum(odds.oddOver)! >= ojFav
+                              ? C.green
+                              : C.red
+                            : C.border2,
+                       }}
                     {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
                     <input type="text" inputMode="decimal" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddUnder && ojAz ? (oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
+                      style={{
+                       ...S.oddInput,
+                       borderColor:
+                         toNum(odds.oddUnder) && ojAz
+                           ? toNum(odds.oddUnder)! >= ojAz
+                             ? C.green
+                             : C.red
+                           : C.border2,
+                       }}
                     {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
                   </div>
                 </div>

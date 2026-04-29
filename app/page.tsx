@@ -863,8 +863,9 @@ export default function Home() {
             const pAz = linhaPos && proj != null ? 1 - normalCDF(proj, linhaPos, MAE_HANDICAP) : null
             const ojFav = pFav ? parseFloat((1 / pFav).toFixed(2)) : null
             const ojAz = pAz ? parseFloat((1 / pAz).toFixed(2)) : null
-            const evFav = pFav && oddFav ? pFav * oddFav - 1 : null
-            const evAz = pAz && oddAz ? pAz * oddAz - 1 : null
+
+          const evFav = pFav && ojFav ? pFav * ojFav - 1 : null
+          const evAz = pAz && ojAz ? pAz * ojAz - 1 : null
 
             return (
               <div style={S.card}>

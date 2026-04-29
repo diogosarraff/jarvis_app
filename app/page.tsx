@@ -32,7 +32,7 @@ const MAE_FG3M = 0.755
 
 type MarketKey = "winner" | "total" | "handicap" | "pts" | "ast" | "reb" | "fg3m"
 const PLAYER_LABELS: Record<Exclude<MarketKey, "winner" | "total" | "handicap">, string> = {
-  pts: "Pontos", ast: "Assistências", reb: "Rebotes", fg3m: "Cestas de 3",
+  pts: "Pontos", ast: "Assists", reb: "Rebotes", fg3m: "3 Pontos",
 }
 const MARKET_LABELS: Record<"winner" | "total" | "handicap", string> = {
   winner: "Vencedor", total: "Total", handicap: "Handicap",
@@ -53,17 +53,6 @@ type Sugestao = {
   scoreJarvis: number | null; confianca: number | null
   motivo: string; alerta: string | null; gameId: string | null
   playerId?: string; tipoJogo?: "winner" | "total" | "handicap"
-}
-
-type MultiplaSugestao = {
-  tipo: "Dupla" | "Tripla"
-  items: RankingItem[]
-  oddCombinada: number
-  probCombinada: number
-  evCombinado: number
-  scoreCombinado: number
-  motivo: string
-  alerta: string | null
 }
 
 // ── Helpers matemáticos ─────────────────────────────────
@@ -98,25 +87,25 @@ const C = {
 }
 
 // Score → cor semáforo
-function semaforoScore(s: number | null | undefined): string {
+function semaforoScore(s: number | null): string {
   if (s == null) return C.textDim
   if (s >= 75) return C.green
   if (s >= 55) return C.yellow
   return C.red
 }
-function semaforoConf(c: number | null | undefined): string {
+function semaforoConf(c: number | null): string {
   if (c == null) return C.textDim
   if (c >= 70) return C.green
   if (c >= 40) return C.yellow
   return C.red
 }
-function semaforoEv(ev: number | null | undefined): string {
+function semaforoEv(ev: number | null): string {
   if (ev == null) return C.textDim
   if (ev > 0.05) return C.green
   if (ev > 0) return C.yellow
   return C.red
 }
-function semaforoProb(p: number | null | undefined): string {
+function semaforoProb(p: number | null): string {
   if (p == null) return C.textDim
   if (p >= 0.65) return C.green
   if (p >= 0.55) return C.yellow
@@ -126,12 +115,10 @@ function semaforoProb(p: number | null | undefined): string {
 // ── Gerador de texto explicativo ────────────────────────
 function gerarMotivo(
   mercado: string, titulo: string, lado: string,
-  prob: number | null | undefined, projecao: number | null | undefined, ojusta: number | null | undefined,
-  confianca: number | null | undefined, score: number | null | undefined
+  prob: number, projecao: number | null, ojusta: number,
+  confianca: number | null, score: number | null
 ): string {
-  const probSafe = prob ?? 0
-  const ojustaSafe = ojusta ?? 0
-  const probPct = (probSafe * 100).toFixed(0)
+  const probPct = (prob * 100).toFixed(0)
   const confStr = confianca != null ? ` Confiança: ${confianca.toFixed(0)}.` : ""
   const scoreStr = score != null ? ` Score Jarvis: ${score.toFixed(0)}.` : ""
   if (mercado === "Vencedor")
@@ -143,11 +130,11 @@ function gerarMotivo(
   if (mercado === "Handicap")
     return `Jarvis projeta spread de ${projecao?.toFixed(1)} pts. Prob de ${lado} cobrir: ${probPct}%.${confStr}${scoreStr}`
   const dir = lado === "Over" ? "superar" : "ficar abaixo d"
-  return `Projeção: ${projecao?.toFixed(1)} — ${probPct}% de probabilidade de ${dir}a linha. Odd justa: ${ojustaSafe.toFixed(2)}.${confStr}${scoreStr}`
+  return `Projeção: ${projecao?.toFixed(1)} — ${probPct}% de probabilidade de ${dir}a linha. Odd justa: ${ojusta.toFixed(2)}.${confStr}${scoreStr}`
 }
 
-function gerarAlerta(mercado: string, prob: number | null | undefined, confianca: number | null | undefined, score: number | null | undefined): string | null {
-  if (mercado === "Vencedor" && (prob ?? 0) < 0.63)
+function gerarAlerta(mercado: string, prob: number, confianca: number | null, score: number | null): string | null {
+  if (mercado === "Vencedor" && prob < 0.63)
     return "Margem pequena — apostar apenas se odd da banca for atrativa."
   if ((mercado === "Total de Pontos" || mercado === "Handicap") && (confianca ?? 0) < 45)
     return "Confiança moderada — mercado de jogo com mais ruído em playoffs."
@@ -159,13 +146,13 @@ function gerarAlerta(mercado: string, prob: number | null | undefined, confianca
 // ── Thresholds por mercado ──────────────────────────────
 function getThresholds(mercado: string): number[] {
   if (mercado === "Pontos") return THRESHOLDS_PTS
-  if (mercado === "Assists" || mercado === "Assistências") return THRESHOLDS_AST
+  if (mercado === "Assists") return THRESHOLDS_AST
   if (mercado === "Rebotes") return THRESHOLDS_REB
   return THRESHOLDS_FG3M
 }
 function getMae(mercado: string): number {
   if (mercado === "Pontos") return MAE_PTS
-  if (mercado === "Assists" || mercado === "Assistências") return MAE_AST
+  if (mercado === "Assists") return MAE_AST
   if (mercado === "Rebotes") return MAE_REB
   return MAE_FG3M
 }
@@ -185,21 +172,20 @@ export default function Home() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
   const [activeGameMarket, setActiveGameMarket] = useState<"winner" | "total" | "handicap">("winner")
   const [activePlayerMarket, setActivePlayerMarket] = useState<"pts" | "ast" | "reb" | "fg3m">("pts")
-  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "selecao" | "apostas">("jogos")
+  const [activeSection, setActiveSection] = useState<"jogos" | "jogadores" | "ranking" | "apostas">("jogos")
   const [loading, setLoading] = useState(true)
-  const [oddsMap, setOddsMap] = useState<Record<string, any>>({})
+  const [oddsMap, setOddsMap] = useState<Record<string, OddsInput>>({})
+  // Odds da banca para sugestões
   const [sugestaoOdds, setSugestaoOdds] = useState<Record<string, { oddBanca?: number; linhaBanca?: number }>>({})
-  const [thresholdOdds, setThresholdOdds] = useState<Record<string, string>>({})
+  // Odds da banca para células de threshold (key: `${playerKey}-${threshold}`)
+  const [thresholdOdds, setThresholdOdds] = useState<Record<string, number>>({})
+  // Célula ativa no modo coluna
   const [activeCell, setActiveCell] = useState<{ key: string; threshold: number; prob: number; oddJustaVal: number; mercado: string; titulo: string; subtitulo: string; projecao: number } | null>(null)
   const [salvando, setSalvando] = useState(false)
-  
-  // Filtros do Ranking (movidos de "Apostas")
+  // Filtros da tela de apostas
   const [filtroTipo, setFiltroTipo] = useState<"simples" | "duplas" | "triplas" | "todas">("todas")
   const [filtroQtd, setFiltroQtd] = useState<number>(8)
   const [filtroOddMax, setFiltroOddMax] = useState<number>(3.0)
-  
-  // Apostas selecionadas para registro em lote
-  const [apostasParaRegistrar, setApostasParaRegistrar] = useState<Set<string>>(new Set())
 
   async function loadApostas() {
     const { data } = await supabase.from("apostas_tracker").select("*").order("created_at", { ascending: false })
@@ -254,6 +240,7 @@ export default function Home() {
       .filter((p) => String(p.game_id) === String(selectedGameId))
       .filter((p) => (getMinutesAverage(p) ?? 0) >= MIN_MINUTOS)
       .filter((p) => {
+        // Para cestas de 3: esconder jogadores que não tentam 3s
         if (activePlayerMarket === "fg3m") {
           const fg3aAvg = Number((p as any).player_fg3a_avg ?? 0)
           return fg3aAvg > 0.5
@@ -262,6 +249,103 @@ export default function Home() {
       })
       .sort((a, b) => (getProjectionFromPlayer(b) ?? 0) - (getProjectionFromPlayer(a) ?? 0))
   }, [selectedGameId, activePlayerMarket, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
+
+  // ── Sugestões automáticas ────────────────────────────────
+  const sugestoes = useMemo((): Sugestao[] => {
+    const items: Sugestao[] = []
+    const playerSources = [
+      { rows: playerPointsRows, mercado: "Pontos" },
+      { rows: playerAssistsRows, mercado: "Assistências" },
+      { rows: playerReboundsRows, mercado: "Rebotes" },
+      { rows: playerThreesRows, mercado: "Cestas de 3" },
+    ]
+    for (const source of playerSources) {
+      for (const row of source.rows) {
+        if ((getMinutesAverage(row) ?? 0) < MIN_MINUTOS) continue
+        const proj = getProjectionFromPlayer(row)
+        const probO = getProbOver(row)
+        const probU = getProbUnder(row)
+        const conf = getModelConfidence(row)
+        if (proj == null) continue
+        for (const [prob, lado] of [[probO, "Over"], [probU, "Under"]] as [number | null, string][]) {
+          if (prob == null || prob < 0.60) continue
+          const oj = oddJusta(prob)
+          const score = calcularScoreJarvis(prob * oj - 1, prob, conf, source.mercado)
+          if ((score ?? 0) < 75) continue
+          items.push({
+            key: `player-${source.mercado}-${row.game_id}-${row.player_id}-${lado}`,
+            mercado: source.mercado, titulo: row.player_name,
+            subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`,
+            lado, projecao: proj, prob, oddJusta: oj, scoreJarvis: score, confianca: conf,
+            motivo: gerarMotivo(source.mercado, row.player_name, lado, prob, proj, oj, conf, score),
+            alerta: gerarAlerta(source.mercado, prob, conf, score),
+            gameId: row.game_id, playerId: row.player_id,
+          })
+        }
+      }
+    }
+    // Mercados de jogo
+    for (const jogo of games) {
+      const winner = winnerRows.find((r) => String(r.game_id) === String(jogo.game_id))
+      if (winner) {
+        const { probCasa, probFora } = getProjectionFromGameWinner(winner)
+        const conf = getModelConfidence(winner)
+        for (const [prob, titulo, lado] of [
+          [probCasa, `${jogo.casa} ML`, jogo.casa],
+          [probFora, `${jogo.fora} ML`, jogo.fora],
+        ] as [number | null, string, string][]) {
+          if (prob == null || prob < 0.60) continue
+          const oj = oddJusta(prob)
+          const score = calcularScoreJarvis(prob * oj - 1, prob, conf, "Vencedor")
+          items.push({
+            key: `winner-${jogo.game_id}-${lado}`, mercado: "Vencedor", titulo,
+            subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado,
+            projecao: prob, prob, oddJusta: oj, scoreJarvis: score, confianca: conf,
+            motivo: gerarMotivo("Vencedor", titulo, lado, prob, prob, oj, conf, score),
+            alerta: gerarAlerta("Vencedor", prob, conf, score),
+            gameId: jogo.game_id, tipoJogo: "winner",
+          })
+        }
+      }
+      const total = totalRows.find((r) => String(r.game_id) === String(jogo.game_id))
+      if (total) {
+        const proj = getProjectionFromGameTotal(total)
+        const conf = getModelConfidence(total)
+        if (proj != null && (conf ?? 0) >= 35) {
+          const score = calcularScoreJarvis(0.05, 0.55, conf, "Total de Pontos")
+          items.push({
+            key: `total-${jogo.game_id}`, mercado: "Total de Pontos",
+            titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", lado: "—",
+            projecao: proj, prob: 0.55, oddJusta: parseFloat((1 / 0.55).toFixed(2)),
+            scoreJarvis: score, confianca: conf,
+            motivo: gerarMotivo("Total de Pontos", `${jogo.casa} vs ${jogo.fora}`, "—", 0.55, proj, 1.82, conf, score),
+            alerta: gerarAlerta("Total de Pontos", 0.55, conf, score),
+            gameId: jogo.game_id, tipoJogo: "total",
+          })
+        }
+      }
+      const handicap = handicapRows.find((r) => String(r.game_id) === String(jogo.game_id))
+      if (handicap) {
+        const proj = getProjectionFromGameHandicap(handicap)
+        const conf = getModelConfidence(handicap)
+        if (proj != null && (conf ?? 0) >= 40) {
+          const favorito = proj > 0 ? jogo.casa : jogo.fora
+          const score = calcularScoreJarvis(0.06, 0.58, conf, "Handicap")
+          items.push({
+            key: `handicap-${jogo.game_id}`, mercado: "Handicap",
+            titulo: `${jogo.casa} vs ${jogo.fora}`,
+            subtitulo: `Favorito: ${favorito} -${Math.abs(proj).toFixed(1)}`, lado: favorito,
+            projecao: proj, prob: 0.58, oddJusta: parseFloat((1 / 0.58).toFixed(2)),
+            scoreJarvis: score, confianca: conf,
+            motivo: gerarMotivo("Handicap", `${jogo.casa} vs ${jogo.fora}`, favorito, 0.58, proj, 1.72, conf, score),
+            alerta: gerarAlerta("Handicap", 0.58, conf, score),
+            gameId: jogo.game_id, tipoJogo: "handicap",
+          })
+        }
+      }
+    }
+    return items.sort((a, b) => (b.scoreJarvis ?? 0) - (a.scoreJarvis ?? 0)).slice(0, 8)
+  }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows])
 
   // ── Ranking ─────────────────────────────────────────────
   const ranking = useMemo(() => {
@@ -273,105 +357,23 @@ export default function Home() {
       if (winner) {
         const { probCasa, probFora } = getProjectionFromGameWinner(winner)
         const odds = oddsMap[`winner-${jogo.game_id}`] || {}
-        const oddHome = toNumber(odds.oddHome)
-        const oddAway = toNumber(odds.oddAway)
         const conf = getModelConfidence(winner) ?? 0
-        if (probCasa != null && oddHome) {
-          const ev = probCasa * oddHome - 1
-          items.push({ 
-            key: `${jogo.game_id}-winner-home`, 
-            categoria: "Jogo", 
-            mercado: "Vencedor", 
-            titulo: `${jogo.casa} ML`, 
-            subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
-            lado: jogo.casa, 
-            odd: oddHome, 
-            prob: probCasa, 
-            projecao: probCasa, 
-            edge: probCasa - 1 / oddHome, 
-            ev, 
-            confianca: conf, 
-            scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor"),
-            linha: undefined
-          })
+        if (probCasa != null && odds.oddHome) {
+          const ev = probCasa * odds.oddHome - 1
+          items.push({ key: `${jogo.game_id}-winner-home`, categoria: "Jogo", mercado: "Vencedor", titulo: `${jogo.casa} ML`, subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado: jogo.casa, odd: odds.oddHome, prob: probCasa, projecao: probCasa, edge: probCasa - 1 / odds.oddHome, ev, confianca: conf, scoreJarvis: calcularScoreJarvis(ev, probCasa, conf, "Vencedor") })
         }
-        if (probFora != null && oddAway) {
-          const ev = probFora * oddAway - 1
-          items.push({ 
-            key: `${jogo.game_id}-winner-away`, 
-            categoria: "Jogo", 
-            mercado: "Vencedor", 
-            titulo: `${jogo.fora} ML`, 
-            subtitulo: `${jogo.casa} vs ${jogo.fora}`, 
-            lado: jogo.fora, 
-            odd: oddAway, 
-            prob: probFora, 
-            projecao: probFora, 
-            edge: probFora - 1 / oddAway, 
-            ev, 
-            confianca: conf, 
-            scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor"),
-            linha: undefined
-          })
+        if (probFora != null && odds.oddAway) {
+          const ev = probFora * odds.oddAway - 1
+          items.push({ key: `${jogo.game_id}-winner-away`, categoria: "Jogo", mercado: "Vencedor", titulo: `${jogo.fora} ML`, subtitulo: `${jogo.casa} vs ${jogo.fora}`, lado: jogo.fora, odd: odds.oddAway, prob: probFora, projecao: probFora, edge: probFora - 1 / odds.oddAway, ev, confianca: conf, scoreJarvis: calcularScoreJarvis(ev, probFora, conf, "Vencedor") })
         }
       }
       if (total) {
         const odds = oddsMap[`total-${jogo.game_id}`] || {}
-        const linha = toNumber(odds.linha)
-        const oddOver = toNumber(odds.oddOver)
-        const oddUnder = toNumber(odds.oddUnder)
-        items.push(...getLineBetRankingItem({ 
-          keyBase: `total-${jogo.game_id}`, 
-          mercado: "Total de Pontos", 
-          titulo: `${jogo.casa} vs ${jogo.fora}`, 
-          subtitulo: "Mercado de jogos", 
-          projecao: getProjectionFromGameTotal(total), 
-          linha, 
-          oddOver, 
-          oddUnder, 
-          modelConfidence: getModelConfidence(total), 
-          probOver: null, 
-          probUnder: null, 
-          tipo: "total" 
-        }))
+        items.push(...getLineBetRankingItem({ keyBase: `total-${jogo.game_id}`, mercado: "Total de Pontos", titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", projecao: getProjectionFromGameTotal(total), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(total), probOver: null, probUnder: null, tipo: "total" }))
       }
       if (handicap) {
         const odds = oddsMap[`handicap-${jogo.game_id}`] || {}
-        const proj = getProjectionFromGameHandicap(handicap)
-        const linhaInput = toNumber(odds.linha)
-        const oddOver = toNumber(odds.oddOver)
-        const oddUnder = toNumber(odds.oddUnder)
-        
-        // Para handicap, vamos ajustar o "lado" para mostrar a linha corretamente
-        const handicapItems = getLineBetRankingItem({ 
-          keyBase: `handicap-${jogo.game_id}`, 
-          mercado: "Handicap", 
-          titulo: `${jogo.casa} vs ${jogo.fora}`, 
-          subtitulo: "Mercado de jogos", 
-          projecao: proj, 
-          linha: linhaInput, 
-          oddOver, 
-          oddUnder, 
-          modelConfidence: getModelConfidence(handicap), 
-          probOver: null, 
-          probUnder: null, 
-          tipo: "handicap" 
-        })
-        
-        // Ajustar o "lado" para mostrar a linha em vez de Over/Under
-        handicapItems.forEach((item: RankingItem) => {
-          if (item.mercado === "Handicap" && item.linha != null) {
-            // Se é o favorito (linha negativa)
-            if (item.lado === "Over") {
-              item.lado = `-${Math.abs(item.linha).toFixed(1)}`
-            } else {
-              // Se é o azarão (linha positiva)
-              item.lado = `+${Math.abs(item.linha).toFixed(1)}`
-            }
-          }
-        })
-        
-        items.push(...handicapItems)
+        items.push(...getLineBetRankingItem({ keyBase: `handicap-${jogo.game_id}`, mercado: "Handicap", titulo: `${jogo.casa} vs ${jogo.fora}`, subtitulo: "Mercado de jogos", projecao: getProjectionFromGameHandicap(handicap), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(handicap), probOver: null, probUnder: null, tipo: "handicap" }))
       }
     }
     const playerSources = [
@@ -385,124 +387,11 @@ export default function Home() {
         if ((getMinutesAverage(row) ?? 0) < MIN_MINUTOS) continue
         const key = `player-${source.mercado}-${row.game_id}-${row.player_id}`
         const odds = oddsMap[key] || {}
-        const linha = toNumber(odds.linha)
-        const oddOver = toNumber(odds.oddOver)
-        const oddUnder = toNumber(odds.oddUnder)
-        items.push(...getLineBetRankingItem({ 
-          keyBase: key, 
-          mercado: source.mercado, 
-          titulo: row.player_name, 
-          subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`, 
-          projecao: getProjectionFromPlayer(row), 
-          linha, 
-          oddOver, 
-          oddUnder, 
-          modelConfidence: getModelConfidence(row), 
-          probOver: getProbOver(row), 
-          probUnder: getProbUnder(row) 
-        }))
+        items.push(...getLineBetRankingItem({ keyBase: key, mercado: source.mercado, titulo: row.player_name, subtitulo: `${getPlayerTeam(row)} vs ${getPlayerOpponent(row)}`, projecao: getProjectionFromPlayer(row), linha: odds.linha, oddOver: odds.oddOver, oddUnder: odds.oddUnder, modelConfidence: getModelConfidence(row), probOver: getProbOver(row), probUnder: getProbUnder(row) }))
       }
     }
-    return items
-      .filter((x) => x.odd && x.ev !== null)
-      .sort((a, b) =>
-        ((b.ev ?? -999) - (a.ev ?? -999)) ||
-        ((b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999)) ||
-        ((b.confianca ?? -999) - (a.confianca ?? -999)) ||
-        String(a.mercado).localeCompare(String(b.mercado))
-      )
+    return items.filter((x) => x.odd && x.ev !== null).sort((a, b) => (b.scoreJarvis ?? -999) - (a.scoreJarvis ?? -999))
   }, [games, winnerRows, totalRows, handicapRows, playerPointsRows, playerAssistsRows, playerReboundsRows, playerThreesRows, oddsMap])
-
-  const selecionadasRanking = useMemo(() => {
-    return ranking.filter((r) => apostasParaRegistrar.has(r.key))
-  }, [ranking, apostasParaRegistrar])
-
-  // ── Sugestões de múltiplas — usa apenas a sua seleção ─────────
-  const sugestoesMultiplas = useMemo(() => {
-    const candidatas = selecionadasRanking.filter((r) =>
-      r.odd != null &&
-      r.prob != null &&
-      r.ev != null &&
-      (r.ev ?? -1) >= 0
-    )
-
-    function gameId(item: RankingItem): string | null {
-      return games.find((g) => item.key.includes(g.game_id))?.game_id ?? null
-    }
-
-    function baixaCorrelacao(items: RankingItem[]): boolean {
-      const jogos = items.map(gameId).filter(Boolean) as string[]
-      const jogosUnicos = new Set(jogos)
-      if (jogos.length !== jogosUnicos.size) return false
-
-      const jogadores = items
-        .filter((x) => x.categoria === "Jogador")
-        .map((x) => x.titulo)
-      if (jogadores.length !== new Set(jogadores).size) return false
-
-      return true
-    }
-
-    function montar(items: RankingItem[], tipo: "Dupla" | "Tripla"): MultiplaSugestao | null {
-      if (!baixaCorrelacao(items)) return null
-
-      const oddCombinada = parseFloat(items.reduce((acc, x) => acc * (x.odd ?? 1), 1).toFixed(2))
-      const probCombinada = parseFloat(items.reduce((acc, x) => acc * (x.prob ?? 0), 1).toFixed(4))
-      const evCombinado = parseFloat((probCombinada * oddCombinada - 1).toFixed(4))
-      const scoreMedio = items.reduce((acc, x) => acc + (x.scoreJarvis ?? 0), 0) / items.length
-      const confiancaMedia = items.reduce((acc, x) => acc + (x.confianca ?? 0), 0) / items.length
-      const mercados = new Set(items.map((x) => x.mercado)).size
-      const bonusDiversidade = mercados >= items.length ? 10 : mercados * 3
-      const scoreCombinado = Math.round(
-        (scoreMedio * 0.45) +
-        (confiancaMedia * 0.20) +
-        (probCombinada * 100 * 0.20) +
-        (Math.max(evCombinado, 0) * 100 * 0.10) +
-        bonusDiversidade
-      )
-
-      if (oddCombinada > filtroOddMax) return null
-      if (evCombinado < 0) return null
-
-      const motivo = `${tipo} montada apenas com apostas que você selecionou. O Jarvis evitou repetir jogo e jogador, combinando EV positivo, probabilidade combinada e diversidade de mercado.`
-      const alerta = probCombinada < 0.45
-        ? "Probabilidade combinada baixa — use stake reduzida."
-        : oddCombinada < 1.80
-          ? "Odd final conservadora — boa para compor odds baixas."
-          : null
-
-      return { tipo, items, oddCombinada, probCombinada, evCombinado, scoreCombinado, motivo, alerta }
-    }
-
-    const duplas: MultiplaSugestao[] = []
-    const triplas: MultiplaSugestao[] = []
-
-    for (let i = 0; i < candidatas.length; i++) {
-      for (let j = i + 1; j < candidatas.length; j++) {
-        const m = montar([candidatas[i], candidatas[j]], "Dupla")
-        if (m) duplas.push(m)
-      }
-    }
-
-    for (let i = 0; i < candidatas.length; i++) {
-      for (let j = i + 1; j < candidatas.length; j++) {
-        for (let k = j + 1; k < candidatas.length; k++) {
-          const m = montar([candidatas[i], candidatas[j], candidatas[k]], "Tripla")
-          if (m) triplas.push(m)
-        }
-      }
-    }
-
-    const ordenar = (a: MultiplaSugestao, b: MultiplaSugestao) =>
-      (b.scoreCombinado - a.scoreCombinado) ||
-      (b.evCombinado - a.evCombinado) ||
-      (b.probCombinada - a.probCombinada)
-
-    return {
-      duplas: duplas.sort(ordenar).slice(0, 5),
-      triplas: triplas.sort(ordenar).slice(0, 5),
-    }
-  }, [selecionadasRanking, filtroOddMax, games])
 
   // ── Dashboard de apostas ─────────────────────────────────
   const dashApostas = useMemo(() => {
@@ -524,7 +413,55 @@ export default function Home() {
     return { total: apostas.length, greens, reds, pendentes: apostas.filter((a) => !a.resultado).length, stakeTotal, lucroTotal, roi, banca, winRate, mercados }
   }, [apostas])
 
+  // ── Sugestões de múltiplas ───────────────────────────────
+  const sugestoesMultiplas = useMemo(() => {
+    const confirmadas = sugestoes.filter((s) => (s.scoreJarvis ?? 0) >= 75 && s.prob >= 0.60)
+    const duplas: { a: Sugestao; b: Sugestao; oddCombinada: number; probCombinada: number }[] = []
+    const triplas: { a: Sugestao; b: Sugestao; c: Sugestao; oddCombinada: number; probCombinada: number }[] = []
+    // Duplas — jogos diferentes para independência
+    for (let i = 0; i < confirmadas.length; i++) {
+      for (let j = i + 1; j < confirmadas.length; j++) {
+        const a = confirmadas[i], b = confirmadas[j]
+        if (a.gameId === b.gameId) continue // mesmo jogo — não independente
+        const oddCombinada = parseFloat((a.oddJusta * b.oddJusta).toFixed(2))
+        const probCombinada = parseFloat((a.prob * b.prob).toFixed(4))
+        if (oddCombinada <= filtroOddMax)
+          duplas.push({ a, b, oddCombinada, probCombinada })
+      }
+    }
+    // Triplas
+    for (let i = 0; i < confirmadas.length; i++) {
+      for (let j = i + 1; j < confirmadas.length; j++) {
+        for (let k = j + 1; k < confirmadas.length; k++) {
+          const a = confirmadas[i], b = confirmadas[j], c = confirmadas[k]
+          if (a.gameId === b.gameId || b.gameId === c.gameId || a.gameId === c.gameId) continue
+          const oddCombinada = parseFloat((a.oddJusta * b.oddJusta * c.oddJusta).toFixed(2))
+          const probCombinada = parseFloat((a.prob * b.prob * c.prob).toFixed(4))
+          if (oddCombinada <= filtroOddMax)
+            triplas.push({ a, b, c, oddCombinada, probCombinada })
+        }
+      }
+    }
+    duplas.sort((a, b) => b.probCombinada - a.probCombinada)
+    triplas.sort((a, b) => b.probCombinada - a.probCombinada)
+    return { duplas: duplas.slice(0, 3), triplas: triplas.slice(0, 2) }
+  }, [sugestoes, filtroOddMax])
+
   // ── Ações ────────────────────────────────────────────────
+  async function registrarSugestao(s: Sugestao, oddBanca?: number, linhaBanca?: number) {
+    setSalvando(true)
+    const ev = oddBanca ? s.prob * oddBanca - 1 : null
+    await supabase.from("apostas_tracker").insert({
+      game_id: s.gameId, game_date: new Date().toISOString().split("T")[0],
+      liga: "NBA", mercado: s.mercado, titulo: s.titulo, subtitulo: s.subtitulo,
+      lado: s.lado, linha: linhaBanca ?? null, odd: oddBanca ?? null,
+      projecao: s.projecao, prob: s.prob, ev, score_jarvis: s.scoreJarvis,
+      confianca: s.confianca, stake: STAKE, resultado: null, lucro: null,
+    })
+    await loadApostas()
+    setSalvando(false)
+  }
+
   async function registrarThreshold(cell: NonNullable<typeof activeCell>, oddBanca: number) {
     setSalvando(true)
     const ev = cell.prob * oddBanca - 1
@@ -554,73 +491,6 @@ export default function Home() {
     setSalvando(false)
   }
 
-  async function registrarSelecionadas() {
-    if (apostasParaRegistrar.size === 0) return
-    setSalvando(true)
-    
-    const itensParaRegistrar = ranking.filter(item => apostasParaRegistrar.has(item.key))
-    
-    for (const item of itensParaRegistrar) {
-      const jogo = games.find((g) => item.key.includes(g.game_id))
-      await supabase.from("apostas_tracker").insert({
-        game_id: jogo?.game_id ?? null, 
-        game_date: new Date().toISOString().split("T")[0],
-        liga: "NBA", 
-        mercado: item.mercado, 
-        titulo: item.titulo, 
-        subtitulo: item.subtitulo,
-        lado: item.lado, 
-        linha: item.linha ?? null, 
-        odd: item.odd ?? null,
-        projecao: item.projecao, 
-        prob: item.prob, 
-        ev: item.ev,
-        score_jarvis: item.scoreJarvis, 
-        confianca: item.confianca,
-        stake: STAKE, 
-        resultado: null, 
-        lucro: null,
-      })
-    }
-    
-    setApostasParaRegistrar(new Set())
-    await loadApostas()
-    setSalvando(false)
-  }
-
-
-  async function registrarMultipla(multipla: MultiplaSugestao) {
-    setSalvando(true)
-    const subtitulo = multipla.items.map((item) => `${item.titulo} ${item.lado} @${fn(item.odd, 2)}`).join(" | ")
-    const gameIds = multipla.items
-      .map((item) => games.find((g) => item.key.includes(g.game_id))?.game_id)
-      .filter(Boolean)
-      .join("+")
-
-    await supabase.from("apostas_tracker").insert({
-      game_id: gameIds || null,
-      game_date: new Date().toISOString().split("T")[0],
-      liga: "NBA",
-      mercado: `Múltipla ${multipla.tipo}`,
-      titulo: `${multipla.tipo} Jarvis @${multipla.oddCombinada}`,
-      subtitulo,
-      lado: "Combinação",
-      linha: null,
-      odd: multipla.oddCombinada,
-      projecao: null,
-      prob: multipla.probCombinada,
-      ev: multipla.evCombinado,
-      score_jarvis: multipla.scoreCombinado,
-      confianca: null,
-      stake: STAKE,
-      resultado: null,
-      lucro: null,
-    })
-
-    await loadApostas()
-    setSalvando(false)
-  }
-
   async function marcarResultado(id: string, resultado: "green" | "red", odd: number | null) {
     const lucro = resultado === "green" ? (odd ?? 0) * STAKE - STAKE : -STAKE
     await supabase.from("apostas_tracker").update({ resultado, lucro }).eq("id", id)
@@ -632,39 +502,12 @@ export default function Home() {
     await loadApostas()
   }
 
-  function normalizarEntradaDecimal(value: string) {
-    return value.replace(",", ".")
-  }
-
-  function toNumber(value: unknown): number | undefined {
-    if (value === undefined || value === null || value === "") return undefined
-    const normalizado = String(value).replace(",", ".")
-    const n = Number(normalizado)
-    return Number.isFinite(n) ? n : undefined
-  }
-
   function handleOddsChange(key: string, field: keyof OddsInput, value: string) {
-    // Mantém exatamente o que o usuário digitou, inclusive vírgula.
-    // A conversão para número acontece só nos cálculos, via toNumber().
-    setOddsMap((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [field]: value,
-      },
-    }))
+    setOddsMap((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) } }))
   }
 
-  function toggleApostaParaRegistrar(key: string) {
-    setApostasParaRegistrar(prev => {
-      const novo = new Set(prev)
-      if (novo.has(key)) {
-        novo.delete(key)
-      } else {
-        novo.add(key)
-      }
-      return novo
-    })
+  function handleSugestaoOdds(key: string, field: "oddBanca" | "linhaBanca", value: string) {
+    setSugestaoOdds((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value === "" ? undefined : Number(value) } }))
   }
 
   // ── Formatadores ─────────────────────────────────────────
@@ -707,12 +550,11 @@ export default function Home() {
 
       {/* Nav */}
       <div style={S.nav}>
-        {(["jogos", "jogadores", "ranking", "selecao", "apostas"] as const).map((s) => (
+        {(["jogos", "jogadores", "ranking", "apostas"] as const).map((s) => (
           <button key={s} onClick={() => setActiveSection(s)}
             style={{ ...S.navBtn, ...(activeSection === s ? S.navBtnActive : {}) }}>
-            {s === "jogos" ? "⚡ Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : s === "selecao" ? "Seleção" : "Apostas"}
+            {s === "jogos" ? "⚡ Jogos" : s === "jogadores" ? "Jogadores" : s === "ranking" ? "Ranking" : "Apostas"}
             {s === "ranking" && ranking.length > 0 && <span style={S.navBadge}>{ranking.length}</span>}
-            {s === "selecao" && apostasParaRegistrar.size > 0 && <span style={{ ...S.navBadge, background: C.green }}>{apostasParaRegistrar.size}</span>}
             {s === "apostas" && apostas.filter((a) => !a.resultado).length > 0 && <span style={{ ...S.navBadge, background: C.yellow }}>{apostas.filter((a) => !a.resultado).length}</span>}
           </button>
         ))}
@@ -735,10 +577,8 @@ export default function Home() {
             const conf = getModelConfidence(winnerRow)
             const key = `winner-${selectedGame.game_id}`
             const odds = oddsMap[key] || {}
-            const oddHome = toNumber(odds.oddHome)
-            const oddAway = toNumber(odds.oddAway)
-            const evHome = probCasa != null && oddHome ? probCasa * oddHome - 1 : null
-            const evAway = probFora != null && oddAway ? probFora * oddAway - 1 : null
+            const evHome = probCasa != null && odds.oddHome ? probCasa * odds.oddHome - 1 : null
+            const evAway = probFora != null && odds.oddAway ? probFora * odds.oddAway - 1 : null
             const ojCasa = probCasa ? parseFloat((1 / probCasa).toFixed(2)) : null
             const ojFora = probFora ? parseFloat((1 / probFora).toFixed(2)) : null
             const favorito = probCasa != null && probFora != null ? (probCasa >= probFora ? selectedGame.casa : selectedGame.fora) : null
@@ -775,16 +615,16 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{selectedGame.casa} (mín {ojCasa ?? "—"})</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojCasa?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojCasa?.toString() ?? "Odd"}
                       value={odds.oddHome ?? ""} onChange={(e) => handleOddsChange(key, "oddHome", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddHome && ojCasa ? (oddHome >= ojCasa ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddHome && ojCasa ? (odds.oddHome >= ojCasa ? C.green : C.red) : C.border2 }} />
                     {evHome != null && <div style={{ ...S.evTag, color: semaforoEv(evHome) }}>EV {evHome > 0 ? "+" : ""}{(evHome * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{selectedGame.fora} (mín {ojFora ?? "—"})</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojFora?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojFora?.toString() ?? "Odd"}
                       value={odds.oddAway ?? ""} onChange={(e) => handleOddsChange(key, "oddAway", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddAway && ojFora ? (oddAway >= ojFora ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddAway && ojFora ? (odds.oddAway >= ojFora ? C.green : C.red) : C.border2 }} />
                     {evAway != null && <div style={{ ...S.evTag, color: semaforoEv(evAway) }}>EV {evAway > 0 ? "+" : ""}{(evAway * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -797,13 +637,10 @@ export default function Home() {
             const conf = getModelConfidence(totalRow)
             const key = `total-${selectedGame.game_id}`
             const odds = oddsMap[key] || {}
-            const linha = toNumber(odds.linha)
-            const oddOver = toNumber(odds.oddOver)
-            const oddUnder = toNumber(odds.oddUnder)
-            const evOver = linha && oddOver && proj != null ? calcularEvOver(proj, linha, oddOver, "total") : null
-            const evUnder = linha && oddUnder && proj != null ? calcularEvUnder(proj, linha, oddUnder, "total") : null
-            const pOver = linha && proj != null ? 1 - normalCDF(linha, proj, MAE_TOTAL) : null
-            const pUnder = linha && proj != null ? normalCDF(linha, proj, MAE_TOTAL) : null
+            const evOver = odds.linha && odds.oddOver && proj != null ? calcularEvOver(proj, odds.linha, odds.oddOver, "total") : null
+            const evUnder = odds.linha && odds.oddUnder && proj != null ? calcularEvUnder(proj, odds.linha, odds.oddUnder, "total") : null
+            const pOver = odds.linha && proj != null ? 1 - normalCDF(odds.linha, proj, MAE_TOTAL) : null
+            const pUnder = odds.linha && proj != null ? normalCDF(odds.linha, proj, MAE_TOTAL) : null
             const ojOver = pOver ? parseFloat((1 / pOver).toFixed(2)) : null
             const ojUnder = pUnder ? parseFloat((1 / pUnder).toFixed(2)) : null
             return (
@@ -817,7 +654,7 @@ export default function Home() {
                   <div style={S.projSub}>Projeção Jarvis</div>
                 </div>
                 <div style={S.lineRow}>
-                  <input type="text" inputMode="decimal" step="0.5" placeholder="Linha da banca"
+                  <input type="number" step="0.5" placeholder="Linha da banca"
                     value={odds.linha ?? ""} onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                     style={{ ...S.oddInput, flex: 1 }} />
                 </div>
@@ -830,16 +667,16 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>Over {ojOver ? `(mín ${ojOver})` : ""}</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojOver?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddOver && ojOver ? (oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojOver ? (odds.oddOver >= ojOver ? C.green : C.red) : C.border2 }} />
                     {evOver != null && <div style={{ ...S.evTag, color: semaforoEv(evOver) }}>EV {evOver > 0 ? "+" : ""}{(evOver * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>Under {ojUnder ? `(mín ${ojUnder})` : ""}</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojUnder?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddUnder && ojUnder ? (oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojUnder ? (odds.oddUnder >= ojUnder ? C.green : C.red) : C.border2 }} />
                     {evUnder != null && <div style={{ ...S.evTag, color: semaforoEv(evUnder) }}>EV {evUnder > 0 ? "+" : ""}{(evUnder * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -857,16 +694,15 @@ export default function Home() {
             const spreadFav = proj != null ? `-${Math.abs(proj).toFixed(1)}` : ""
             const spreadAz = proj != null ? `+${Math.abs(proj).toFixed(1)}` : ""
 
+            // Calcular prob e odd justa para linha negativa (favorito)
             const linhaNeg = odds.linha ? -Math.abs(odds.linha) : null
             const linhaPos = odds.linha ? Math.abs(odds.linha) : null
             const pFav = linhaNeg && proj != null ? normalCDF(proj, Math.abs(linhaNeg), MAE_HANDICAP) : null
             const pAz = linhaPos && proj != null ? 1 - normalCDF(proj, linhaPos, MAE_HANDICAP) : null
             const ojFav = pFav ? parseFloat((1 / pFav).toFixed(2)) : null
             const ojAz = pAz ? parseFloat((1 / pAz).toFixed(2)) : null
-            const oddOver = toNumber(odds.oddOver)
-            const oddUnder = toNumber(odds.oddUnder)
-            const evFav = pFav && oddOver ? pFav * oddOver - 1 : null
-            const evAz = pAz && oddUnder ? pAz * oddUnder - 1 : null
+            const evFav = pFav && odds.oddOver ? pFav * odds.oddOver - 1 : null
+            const evAz = pAz && odds.oddUnder ? pAz * odds.oddUnder - 1 : null
 
             return (
               <div style={S.card}>
@@ -879,7 +715,7 @@ export default function Home() {
                   <div style={S.projSub}>Favorito Jarvis: <strong style={{ color: C.gold }}>{favorito}</strong></div>
                 </div>
                 <div style={S.lineRow}>
-                  <input type="text" inputMode="decimal" step="0.5" placeholder="Linha (ex: 9.5)"
+                  <input type="number" step="0.5" placeholder="Linha (ex: 9.5)"
                     value={odds.linha ?? ""} onChange={(e) => handleOddsChange(key, "linha", e.target.value)}
                     style={{ ...S.oddInput, flex: 1 }} />
                 </div>
@@ -892,16 +728,16 @@ export default function Home() {
                 <div style={S.oddsRow}>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{favorito} {linhaNeg?.toFixed(1) ?? spreadFav} {ojFav ? `(mín ${ojFav})` : ""}</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojFav?.toString() ?? "Odd"}
                       value={odds.oddOver ?? ""} onChange={(e) => handleOddsChange(key, "oddOver", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddOver && ojFav ? (oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddOver && ojFav ? (odds.oddOver >= ojFav ? C.green : C.red) : C.border2 }} />
                     {evFav != null && <div style={{ ...S.evTag, color: semaforoEv(evFav) }}>EV {evFav > 0 ? "+" : ""}{(evFav * 100).toFixed(1)}%</div>}
                   </div>
                   <div style={S.oddGroup}>
                     <div style={S.oddLabel}>{azarao} +{linhaPos?.toFixed(1) ?? spreadAz.replace("+", "")} {ojAz ? `(mín ${ojAz})` : ""}</div>
-                    <input type="text" inputMode="decimal" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
+                    <input type="number" step="0.01" placeholder={ojAz?.toString() ?? "Odd"}
                       value={odds.oddUnder ?? ""} onChange={(e) => handleOddsChange(key, "oddUnder", e.target.value)}
-                      style={{ ...S.oddInput, borderColor: oddUnder && ojAz ? (oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
+                      style={{ ...S.oddInput, borderColor: odds.oddUnder && ojAz ? (odds.oddUnder >= ojAz ? C.green : C.red) : C.border2 }} />
                     {evAz != null && <div style={{ ...S.evTag, color: semaforoEv(evAz) }}>EV {evAz > 0 ? "+" : ""}{(evAz * 100).toFixed(1)}%</div>}
                   </div>
                 </div>
@@ -949,13 +785,12 @@ export default function Home() {
                 </div>
               </div>
               <div style={S.oddLabel}>Odd da banca (mín: {activeCell.oddJustaVal.toFixed(2)})</div>
-              <input type="text" inputMode="decimal" step="0.01" placeholder={activeCell.oddJustaVal.toFixed(2)}
+              <input type="number" step="0.01" placeholder={activeCell.oddJustaVal.toFixed(2)}
                 value={thresholdOdds[activeCell.key] ?? ""}
-                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: e.target.value }))}
+                onChange={(e) => setThresholdOdds(prev => ({ ...prev, [activeCell.key]: Number(e.target.value) }))}
                 style={{ ...S.oddInput, marginBottom: 8, marginTop: 4 }} />
-              {thresholdOdds[activeCell.key] !== undefined && thresholdOdds[activeCell.key] !== "" && (() => {
-                const ob = toNumber(thresholdOdds[activeCell.key])
-                if (!ob) return null
+              {thresholdOdds[activeCell.key] != null && (() => {
+                const ob = thresholdOdds[activeCell.key]
                 const ev = activeCell.prob * ob - 1
                 const temValor = ob >= activeCell.oddJustaVal
                 return (
@@ -981,6 +816,7 @@ export default function Home() {
             ? <div style={S.empty}>Nenhum jogador encontrado.</div>
             : (
               <div style={S.tableContainer}>
+                {/* Cabeçalho da tabela */}
                 <div style={S.tableHeader}>
                   <div style={S.tableColPlayer}>Jogador</div>
                   <div style={S.tableColProj}>Proj</div>
@@ -990,6 +826,7 @@ export default function Home() {
                   <div style={S.tableColOutra}>Outra</div>
                 </div>
 
+                {/* Linhas dos jogadores */}
                 {playersForSelectedGame.map((player) => {
                   const mercadoLabel = PLAYER_LABELS[activePlayerMarket]
                   const proj = getProjectionFromPlayer(player) ?? 0
@@ -998,10 +835,10 @@ export default function Home() {
                   const thresholds = getThresholds(mercadoLabel)
                   const playerKey = `player-${mercadoLabel}-${player.game_id}-${player.player_id}`
                   const odds = oddsMap[playerKey] || {}
-                  const linha = toNumber(odds.linha)
 
                   return (
                     <div key={playerKey} style={S.tableRow}>
+                      {/* Jogador */}
                       <div style={S.tableColPlayer}>
                         <div style={S.playerNameSmall}>{player.player_name}</div>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -1014,15 +851,18 @@ export default function Home() {
                         </div>
                       </div>
 
+                      {/* Projeção */}
                       <div style={S.tableColProj}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>{fn(proj, 1)}</span>
                       </div>
 
+                      {/* Células de threshold */}
                       {thresholds.map((t) => {
-                        const p = probOver(proj, t - 0.5, mae)
+                        const p = probOver(proj, t - 0.5, mae) // threshold -0.5 para capturar exato (ex: 15+ = superar 14.5)
                         const oj = oddJusta(p)
                         const cellKey = `${playerKey}-${t}`
                         const isActive = activeCell?.key === cellKey
+                        // Semáforo: verde se prob ≥ 65%, amarelo se ≥ 55%, vermelho se < 55%
                         const cellColor = p >= 0.65 ? C.green : p >= 0.55 ? C.yellow : C.red
                         return (
                           <div key={t} style={S.tableColThreshold}>
@@ -1046,31 +886,30 @@ export default function Home() {
                         )
                       })}
 
+                      {/* Coluna Outra — linha customizável */}
                       <div style={S.tableColOutra}>
-                        <input type="text" inputMode="decimal" step="0.5" placeholder=",5"
+                        <input type="number" step="0.5" placeholder=",5"
                           value={odds.linha ?? ""}
                           onChange={(e) => handleOddsChange(playerKey, "linha", e.target.value)}
                           style={{ ...S.playerInputSmall, width: "100%" }} />
-                        {linha && (() => {
+                        {odds.linha && (() => {
                           const pO = getProbOver(player)
                           const pU = getProbUnder(player)
                           const ojO = pO ? parseFloat((1 / pO).toFixed(2)) : null
                           const ojU = pU ? parseFloat((1 / pU).toFixed(2)) : null
-                          const oddOver = toNumber(odds.oddOver)
-                          const oddUnder = toNumber(odds.oddUnder)
                           return (
                             <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
                               <div style={{ flex: 1 }}>
-                                <input type="text" inputMode="decimal" step="0.01" placeholder={ojO?.toString() ?? "Over"}
+                                <input type="number" step="0.01" placeholder={ojO?.toString() ?? "Over"}
                                   value={odds.oddOver ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddOver", e.target.value)}
-                                  style={{ ...S.playerInputSmall, borderColor: oddOver && ojO ? (oddOver >= ojO ? C.green : C.red) : C.border2 }} />
+                                  style={{ ...S.playerInputSmall, borderColor: odds.oddOver && ojO ? (odds.oddOver >= ojO ? C.green : C.red) : C.border2 }} />
                               </div>
                               <div style={{ flex: 1 }}>
-                                <input type="text" inputMode="decimal" step="0.01" placeholder={ojU?.toString() ?? "Und"}
+                                <input type="number" step="0.01" placeholder={ojU?.toString() ?? "Und"}
                                   value={odds.oddUnder ?? ""}
                                   onChange={(e) => handleOddsChange(playerKey, "oddUnder", e.target.value)}
-                                  style={{ ...S.playerInputSmall, borderColor: oddUnder && ojU ? (oddUnder >= ojU ? C.green : C.red) : C.border2 }} />
+                                  style={{ ...S.playerInputSmall, borderColor: odds.oddUnder && ojU ? (odds.oddUnder >= ojU ? C.green : C.red) : C.border2 }} />
                               </div>
                             </div>
                           )
@@ -1087,248 +926,55 @@ export default function Home() {
       {/* ── RANKING ── */}
       {activeSection === "ranking" && (
         <div style={S.section}>
-          <div style={S.filtrosRow}>
-            <div style={S.filtroGroup}>
-              <div style={S.oddLabel}>Qtd</div>
-              <input type="text" inputMode="numeric" step="1" min={1} max={30} value={filtroQtd}
-                onChange={(e) => setFiltroQtd(Number(normalizarEntradaDecimal(e.target.value)))}
-                style={{ ...S.playerInputSmall, width: 50 }} />
-            </div>
-          </div>
-
-          {ranking.length > 0 ? (
-            <div style={{ marginBottom: 16 }}>
-              <div style={S.rankingSecaoTitulo}>
-                <span style={S.rankingSecaoLabel}>RANKING DE VALOR</span>
-                <span style={S.rankingSecaoCount}>{ranking.length} oportunidades · escolha antes de registrar</span>
-              </div>
-              <div style={S.rankList}>
-                {ranking.slice(0, filtroQtd).map((item, i) => {
-                  const jaReg = apostasJaRegistradas.has(`${item.titulo}-${item.lado}-${item.mercado}`)
-                  const selecionado = apostasParaRegistrar.has(item.key)
-                  const scoreCor = semaforoScore(item.scoreJarvis)
-                  const motivo = gerarMotivo(
-                    item.mercado,
-                    item.titulo,
-                    item.lado,
-                    item.prob ?? 0,
-                    item.projecao ?? 0,
-                    item.odd ?? 0,
-                    item.confianca ?? 0,
-                    item.scoreJarvis ?? 0
-                  )
-                  const alerta = gerarAlerta(item.mercado, item.prob ?? 0, item.confianca ?? 0, item.scoreJarvis ?? 0)
-
-                  return (
-                    <div key={item.key} style={{
-                      ...S.rankRow,
-                      borderColor: selecionado ? C.gold : C.border,
-                      background: selecionado ? C.goldBg : C.surfaceRaised
-                    }}>
-                      <div style={S.rankPos}>#{i + 1}</div>
-                      <div style={S.rankInfo}>
-                        <div style={S.rankTitle}>{item.titulo}</div>
-                        <div style={S.rankMeta}>
-                          <span style={S.rankMercado}>{item.mercado}</span>
-                          <span style={S.rankSub}>{item.subtitulo}</span>
-                        </div>
-
-                        <div style={S.motivoBox}>
-                          <div style={S.motivoText}>{motivo}</div>
-                          {alerta && <div style={S.alertaText}>⚠️ {alerta}</div>}
-                        </div>
-
-                        <div style={S.rankStats}>
-                          <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
-                          {item.linha != null && <span style={S.rankStat}><span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}</span>}
-                          <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
-                          <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
-                          <span style={S.rankStat}><span style={S.rankStatLabel}>Score</span> <span style={{ color: scoreCor }}>{fn(item.scoreJarvis, 0)}</span></span>
-                        </div>
-
-                        {!jaReg ? (
-                          <button
-                            onClick={() => toggleApostaParaRegistrar(item.key)}
-                            style={{
-                              ...S.registerBtn,
-                              ...(selecionado ? { background: C.gold, color: C.bg, fontWeight: 800 } : {})
-                            }}>
-                            {selecionado ? "✓ Na Seleção" : "📌 Adicionar à Seleção"}
-                          </button>
-                        ) : (
-                          <div style={S.registerBtnDone}>✓ Já em Apostas feitas</div>
-                        )}
-                      </div>
-                      <div style={S.rankEvCol}>
-                        <div style={{ ...S.rankEv, color: semaforoEv(item.ev) }}>
-                          {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
-                        </div>
-                        <div style={S.rankEvLabel}>EV</div>
-                        {item.scoreJarvis != null && (
-                          <div style={{ ...S.rankScoreBadge, borderColor: scoreCor + "44" }}>
-                            <span style={{ ...S.rankScoreValue, color: scoreCor }}>{item.scoreJarvis.toFixed(0)}</span>
-                            <span style={S.rankScoreLabel}>SCORE</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ) : (
+          {ranking.length === 0 ? (
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>⚡</div>
               <div style={S.emptyTitle}>Sem apostas calculadas</div>
               <div style={S.emptySub}>Preencha linhas e odds nos mercados para ver o ranking.</div>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ── SELEÇÃO ── */}
-      {activeSection === "selecao" && (
-        <div style={S.section}>
-          <div style={S.rankingSecaoTitulo}>
-            <span style={S.rankingSecaoLabel}>MINHA SELEÇÃO</span>
-            <span style={S.rankingSecaoCount}>{selecionadasRanking.length} escolhidas para decidir</span>
-          </div>
-
-          {selecionadasRanking.length === 0 ? (
-            <div style={S.emptyRanking}>
-              <div style={S.emptyIcon}>📌</div>
-              <div style={S.emptyTitle}>Nenhuma aposta selecionada</div>
-              <div style={S.emptySub}>Vá ao Ranking e toque em “Adicionar à Seleção”. Depois o Jarvis monta simples e múltiplas aqui.</div>
-            </div>
           ) : (
-            <>
-              <div style={{ ...S.motivoBox, marginBottom: 12 }}>
-                <div style={S.motivoText}>
-                  Esta aba é a mesa de decisão: aqui ficam apenas as oportunidades que você escolheu. Você pode registrar apostas simples ou deixar o Jarvis sugerir múltiplas com baixa correlação.
-                </div>
-              </div>
-
-              <div style={S.filtrosRow}>
-                <div style={S.filtroGroup}>
-                  <div style={S.oddLabel}>Odd máx múltiplas</div>
-                  <input type="text" inputMode="decimal" step="0.1" value={filtroOddMax}
-                    onChange={(e) => setFiltroOddMax(Number(normalizarEntradaDecimal(e.target.value)))}
-                    style={{ ...S.playerInputSmall, width: 70 }} />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={S.rankingSecaoTitulo}>
-                  <span style={S.rankingSecaoLabel}>SIMPLES SELECIONADAS</span>
-                  <span style={S.rankingSecaoCount}>{selecionadasRanking.length}</span>
-                </div>
-                <div style={S.rankList}>
-                  {selecionadasRanking.map((item, i) => {
-                    const scoreCor = semaforoScore(item.scoreJarvis)
-                    return (
-                      <div key={item.key} style={S.rankRow}>
-                        <div style={S.rankPos}>#{i + 1}</div>
-                        <div style={S.rankInfo}>
-                          <div style={S.rankTitle}>{item.titulo}</div>
-                          <div style={S.rankMeta}>
-                            <span style={S.rankMercado}>{item.mercado}</span>
-                            <span style={S.rankSub}>{item.subtitulo}</span>
-                          </div>
-                          <div style={S.rankStats}>
-                            <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
-                            {item.linha != null && <span style={S.rankStat}><span style={S.rankStatLabel}>Linha</span> {fn(item.linha, 1)}</span>}
-                            <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
-                            <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
-                            <span style={S.rankStat}><span style={S.rankStatLabel}>EV</span> <span style={{ color: semaforoEv(item.ev) }}>{item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</span></span>
-                            <span style={S.rankStat}><span style={S.rankStatLabel}>Score</span> <span style={{ color: scoreCor }}>{fn(item.scoreJarvis, 0)}</span></span>
-                          </div>
-                          <button onClick={() => toggleApostaParaRegistrar(item.key)} style={S.registerBtn}>
-                            Remover da seleção
-                          </button>
+            <div style={S.rankList}>
+              {ranking.map((item, i) => {
+                const jaReg = apostasJaRegistradas.has(`${item.titulo}-${item.lado}-${item.mercado}`)
+                const jogo = games.find((g) => item.key.includes(g.game_id))
+                const scoreCor = semaforoScore(item.scoreJarvis)
+                return (
+                  <div key={item.key} style={S.rankRow}>
+                    <div style={S.rankPos}>#{i + 1}</div>
+                    <div style={S.rankInfo}>
+                      <div style={S.rankTitle}>{item.titulo}</div>
+                      <div style={S.rankMeta}>
+                        <span style={S.rankMercado}>{item.mercado}</span>
+                        <span style={S.rankSub}>{item.subtitulo}</span>
+                      </div>
+                      <div style={S.rankStats}>
+                        <span style={S.rankStat}><span style={S.rankStatLabel}>Lado</span> {item.lado}</span>
+                        <span style={S.rankStat}><span style={S.rankStatLabel}>Prob</span> <span style={{ color: semaforoProb(item.prob) }}>{fp(item.prob)}</span></span>
+                        <span style={S.rankStat}><span style={S.rankStatLabel}>Odd</span> {fn(item.odd, 2)}</span>
+                        <span style={S.rankStat}><span style={S.rankStatLabel}>Edge</span> {fn(item.edge, 3)}</span>
+                      </div>
+                      <button onClick={() => !jaReg && registrarRanking(item, jogo?.game_id ?? null)}
+                        disabled={jaReg || salvando}
+                        style={{ ...S.registerBtn, ...(jaReg ? S.registerBtnDone : {}) }}>
+                        {jaReg ? "✓ No Ranking" : "📌 Salvar no Ranking"}
+                      </button>
+                    </div>
+                    <div style={S.rankEvCol}>
+                      <div style={{ ...S.rankEv, color: semaforoEv(item.ev) }}>
+                        {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}
+                      </div>
+                      <div style={S.rankEvLabel}>EV</div>
+                      {item.scoreJarvis != null && (
+                        <div style={{ ...S.rankScoreBadge, borderColor: scoreCor + "44" }}>
+                          <span style={{ ...S.rankScoreValue, color: scoreCor }}>{item.scoreJarvis.toFixed(0)}</span>
+                          <span style={S.rankScoreLabel}>SCORE</span>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <button
-                  onClick={registrarSelecionadas}
-                  disabled={salvando}
-                  style={{ ...S.registerBtnReady, marginTop: 12 }}>
-                  Registrar {selecionadasRanking.length} simples em Apostas feitas
-                </button>
-              </div>
-
-              {sugestoesMultiplas.duplas.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={S.rankingSecaoTitulo}>
-                    <span style={S.rankingSecaoLabel}>MÚLTIPLAS CONSERVADORAS</span>
-                    <span style={S.rankingSecaoCount}>Duplas sugeridas</span>
-                  </div>
-                  {sugestoesMultiplas.duplas.map((dupla, idx) => (
-                    <div key={`dupla-${idx}`} style={S.multiplaCard}>
-                      <div style={S.multiplaHeader}>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>DUPLA #{idx + 1}</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{dupla.oddCombinada}</span>
-                        <span style={{ fontSize: 11, color: semaforoProb(dupla.probCombinada) }}>{fp(dupla.probCombinada)} prob</span>
-                        <span style={{ fontSize: 11, color: semaforoEv(dupla.evCombinado) }}>{dupla.evCombinado > 0 ? "+" : ""}{(dupla.evCombinado * 100).toFixed(1)}% EV</span>
-                        <span style={{ fontSize: 11, color: semaforoScore(dupla.scoreCombinado) }}>Score {dupla.scoreCombinado}</span>
-                      </div>
-                      <div style={S.motivoBox}>
-                        <div style={S.motivoText}>{dupla.motivo}</div>
-                        {dupla.alerta && <div style={S.alertaText}>⚠️ {dupla.alerta}</div>}
-                      </div>
-                      <div style={S.multiplaLegs}>
-                        {dupla.items.map((item, i) => (
-                          <div key={i} style={S.multiplaLeg}>
-                            <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
-                            <div style={S.multiplaLegDetalhe}>{item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)} · EV {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={() => registrarMultipla(dupla)} disabled={salvando} style={{ ...S.registerBtnReady, marginTop: 10 }}>
-                        Registrar esta dupla em Apostas feitas
-                      </button>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {sugestoesMultiplas.triplas.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={S.rankingSecaoTitulo}>
-                    <span style={S.rankingSecaoLabel}>MÚLTIPLAS MODERADAS</span>
-                    <span style={S.rankingSecaoCount}>Triplas sugeridas</span>
                   </div>
-                  {sugestoesMultiplas.triplas.map((tripla, idx) => (
-                    <div key={`tripla-${idx}`} style={S.multiplaCard}>
-                      <div style={S.multiplaHeader}>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: C.gold }}>TRIPLA #{idx + 1}</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: C.gold }}>@{tripla.oddCombinada}</span>
-                        <span style={{ fontSize: 11, color: semaforoProb(tripla.probCombinada) }}>{fp(tripla.probCombinada)} prob</span>
-                        <span style={{ fontSize: 11, color: semaforoEv(tripla.evCombinado) }}>{tripla.evCombinado > 0 ? "+" : ""}{(tripla.evCombinado * 100).toFixed(1)}% EV</span>
-                        <span style={{ fontSize: 11, color: semaforoScore(tripla.scoreCombinado) }}>Score {tripla.scoreCombinado}</span>
-                      </div>
-                      <div style={S.motivoBox}>
-                        <div style={S.motivoText}>{tripla.motivo}</div>
-                        {tripla.alerta && <div style={S.alertaText}>⚠️ {tripla.alerta}</div>}
-                      </div>
-                      <div style={S.multiplaLegs}>
-                        {tripla.items.map((item, i) => (
-                          <div key={i} style={S.multiplaLeg}>
-                            <div style={S.multiplaLegNome}>{item.titulo} · {item.lado}</div>
-                            <div style={S.multiplaLegDetalhe}>{item.mercado} · @{fn(item.odd, 2)} · {fp(item.prob)} · EV {item.ev != null ? `${item.ev > 0 ? "+" : ""}${(item.ev * 100).toFixed(1)}%` : "—"}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={() => registrarMultipla(tripla)} disabled={salvando} style={{ ...S.registerBtnReady, marginTop: 10 }}>
-                        Registrar esta tripla em Apostas feitas
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
+                )
+              })}
+            </div>
           )}
         </div>
       )}
@@ -1361,16 +1007,43 @@ export default function Home() {
             </div>
           )}
 
+          {/* Filtros */}
+          <div style={S.filtrosRow}>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Tipo</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {(["todas", "simples", "duplas", "triplas"] as const).map((t) => (
+                  <button key={t} onClick={() => setFiltroTipo(t)}
+                    style={{ ...S.filtroBtn, ...(filtroTipo === t ? S.filtroBtnActive : {}) }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Odd máx</div>
+              <input type="number" step="0.1" value={filtroOddMax}
+                onChange={(e) => setFiltroOddMax(Number(e.target.value))}
+                style={{ ...S.playerInputSmall, width: 60 }} />
+            </div>
+            <div style={S.filtroGroup}>
+              <div style={S.oddLabel}>Qtd</div>
+              <input type="number" step="1" min={1} max={20} value={filtroQtd}
+                onChange={(e) => setFiltroQtd(Number(e.target.value))}
+                style={{ ...S.playerInputSmall, width: 50 }} />
+            </div>
+          </div>
+
           {/* Lista de apostas */}
           {apostas.length === 0 ? (
             <div style={S.emptyRanking}>
               <div style={S.emptyIcon}>📋</div>
               <div style={S.emptyTitle}>Nenhuma aposta registrada</div>
-              <div style={S.emptySub}>Selecione apostas no Ranking para começar.</div>
+              <div style={S.emptySub}>Preencha linhas e odds nos mercados de Jogos e Jogadores para ver o ranking.</div>
             </div>
           ) : (
             <div style={S.apostasList}>
-              {apostas.map((aposta) => (
+              {apostas.slice(0, filtroQtd).map((aposta) => (
                 <div key={aposta.id} style={{
                   ...S.apostaCard,
                   borderColor: aposta.resultado === "green" ? C.green + "44"
@@ -1419,7 +1092,7 @@ export default function Home() {
 
 // ── Estilos ──────────────────────────────────────────────
 const styles: Record<string, React.CSSProperties> = {
-  root: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'SF Pro Display', 'Helvetica Neue', sans-serif", fontSize: 14, paddingBottom: 80 },
+  root: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'SF Pro Display', 'Helvetica Neue', sans-serif", fontSize: 14, paddingBottom: 40 },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 12px", borderBottom: `1px solid ${C.border2}`, background: C.surface },
   headerLeft: { display: "flex", alignItems: "center", gap: 10 },
   logo: { display: "flex", alignItems: "baseline", gap: 2 },
@@ -1441,6 +1114,42 @@ const styles: Record<string, React.CSSProperties> = {
   navBtnActive: { color: C.gold },
   navBadge: { fontSize: 9, fontWeight: 700, color: C.bg, background: C.gold, borderRadius: 10, padding: "1px 4px", minWidth: 14, textAlign: "center" as any },
   section: { padding: "12px 12px 0" },
+
+  // Sugestões
+  sugestaoHeader: { marginBottom: 12 },
+  sugestaoTitle: { fontSize: 16, fontWeight: 800, color: C.gold, marginBottom: 2 },
+  sugestaoSub: { fontSize: 11, color: C.textMuted },
+  sugestaoList: { display: "flex", flexDirection: "column" as any, gap: 10 },
+  sugestaoCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 14, padding: 14, transition: "border-color 0.2s, box-shadow 0.2s" },
+  sugestaoTop: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" as any },
+  sugestaoRank: { fontSize: 11, fontWeight: 800, color: C.goldDim, minWidth: 20 },
+  sugestaoSide: { fontSize: 11, fontWeight: 600, color: C.textMuted },
+  sugestaoNome: { fontSize: 15, fontWeight: 800, color: C.white, marginBottom: 2 },
+  sugestaoSubtitulo: { fontSize: 11, color: C.textMuted, marginBottom: 10 },
+  scorePill: { fontSize: 10, fontWeight: 800, marginLeft: "auto", border: "1px solid", borderRadius: 4, padding: "1px 5px" },
+  sugestaoMetrics: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 },
+  metricBlock: { background: C.surface2, borderRadius: 8, padding: "6px 8px", textAlign: "center" as any },
+  metricLabel: { fontSize: 9, color: C.textMuted, fontWeight: 600, letterSpacing: "0.5px", marginBottom: 2 },
+  metricVal: { fontSize: 13, fontWeight: 800, color: C.text },
+  motivoBox: { background: C.surface2, borderRadius: 8, padding: "8px 10px", marginBottom: 10 },
+  motivoText: { fontSize: 11, color: C.textMuted, lineHeight: 1.5 },
+  alertaText: { fontSize: 10, color: C.yellow, marginTop: 4, lineHeight: 1.4 },
+  sugestaoInputRow: { display: "flex", gap: 8, marginBottom: 8 },
+  sugestaoInputGroup: { flex: 1, display: "flex", flexDirection: "column" as any, gap: 4 },
+  semValorBox: { padding: "10px 12px", background: C.redBg + "22", border: `1px solid ${C.red}44`, borderRadius: 8, color: C.red, fontSize: 12, fontWeight: 700, textAlign: "center" as any, marginBottom: 4 },
+  registerBtn: { width: "100%", padding: "9px", background: C.goldBg, border: `1px solid ${C.goldDim}`, borderRadius: 8, color: C.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "center" as any },
+  registerBtnDone: { background: C.greenBg + "22", border: `1px solid ${C.green}44`, color: C.green, cursor: "default" },
+  registerBtnReady: { width: "100%", padding: "9px", background: C.gold, border: `1px solid ${C.goldLight}`, borderRadius: 8, color: C.bg, fontWeight: 800, cursor: "pointer", textAlign: "center" as any, fontSize: 12 },
+
+  // Múltiplas
+  multiplaSection: { marginTop: 12, padding: "12px 0 0" },
+  multiplaTitle: { fontSize: 14, fontWeight: 800, color: C.gold, marginBottom: 4 },
+  multiplaCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "10px 12px", marginTop: 8 },
+  multiplaHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
+  multiplaLegs: { display: "flex", flexDirection: "column" as any, gap: 4 },
+  multiplaLeg: { display: "flex", flexDirection: "column" as any, padding: "4px 8px", background: C.surface2, borderRadius: 6 },
+  multiplaLegNome: { fontSize: 11, fontWeight: 700, color: C.text },
+  multiplaLegDetalhe: { fontSize: 10, color: C.textMuted },
 
   // Jogos
   marketTabs: { display: "flex", gap: 6, marginBottom: 10 },
@@ -1495,33 +1204,16 @@ const styles: Record<string, React.CSSProperties> = {
   // Modal de célula ativa
   cellModal: { background: C.surfaceRaised, border: `1px solid ${C.gold}`, borderRadius: 12, padding: 14, marginBottom: 10, boxShadow: `0 0 16px ${C.goldDim}` },
   cellModalHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 },
-  metricBlock: { background: C.surface2, borderRadius: 8, padding: "6px 8px", textAlign: "center" as any },
-  metricLabel: { fontSize: 9, color: C.textMuted, fontWeight: 600, letterSpacing: "0.5px", marginBottom: 2 },
-  metricVal: { fontSize: 13, fontWeight: 800, color: C.text },
 
   // Ranking
-  filtrosRow: { display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" as any },
-  filtroGroup: { display: "flex", flexDirection: "column" as any, gap: 4 },
-  filtroBtn: { padding: "4px 8px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textMuted, fontSize: 10, fontWeight: 600, cursor: "pointer" },
-  filtroBtnActive: { background: C.goldBg, border: `1px solid ${C.gold}`, color: C.gold },
-  
-  rankingSecaoTitulo: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "8px 0" },
-  rankingSecaoLabel: { fontSize: 12, fontWeight: 800, color: C.gold, letterSpacing: "1.5px" },
-  rankingSecaoCount: { fontSize: 10, fontWeight: 600, color: C.textMuted },
-  
-  rankList: { display: "flex", flexDirection: "column" as any, gap: 8 },
-  rankRow: { display: "flex", alignItems: "flex-start", gap: 10, background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.2s" },
+  rankList: { display: "flex", flexDirection: "column" as any, gap: 6 },
+  rankRow: { display: "flex", alignItems: "flex-start", gap: 10, background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px" },
   rankPos: { fontSize: 11, fontWeight: 800, color: C.goldDim, minWidth: 24, paddingTop: 2 },
   rankInfo: { flex: 1, minWidth: 0 },
   rankTitle: { fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as any },
-  rankMeta: { display: "flex", gap: 6, alignItems: "center", marginBottom: 8 },
+  rankMeta: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6 },
   rankMercado: { fontSize: 9, fontWeight: 700, color: C.bg, background: C.gold, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase" as any },
   rankSub: { fontSize: 10, color: C.textMuted },
-  
-  motivoBox: { background: C.surface2, borderRadius: 8, padding: "8px 10px", marginBottom: 10 },
-  motivoText: { fontSize: 11, color: C.textMuted, lineHeight: 1.5 },
-  alertaText: { fontSize: 10, color: C.yellow, marginTop: 4, lineHeight: 1.4 },
-  
   rankStats: { display: "flex", gap: 8, flexWrap: "wrap" as any, marginBottom: 8 },
   rankStat: { fontSize: 11, color: C.textMuted },
   rankStatLabel: { color: C.textDim, marginRight: 2 },
@@ -1532,19 +1224,11 @@ const styles: Record<string, React.CSSProperties> = {
   rankScoreValue: { fontSize: 15, fontWeight: 800 },
   rankScoreLabel: { fontSize: 8, fontWeight: 700, color: C.textDim, letterSpacing: "1px" },
 
-  registerBtn: { width: "100%", padding: "9px", background: C.goldBg, border: `1px solid ${C.goldDim}`, borderRadius: 8, color: C.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "center" as any, transition: "all 0.2s" },
-  registerBtnDone: { width: "100%", padding: "9px", background: C.greenBg + "22", border: `1px solid ${C.green}44`, borderRadius: 8, color: C.green, fontSize: 12, fontWeight: 600, textAlign: "center" as any },
-  registerBtnReady: { width: "100%", padding: "9px", background: C.gold, border: `1px solid ${C.goldLight}`, borderRadius: 8, color: C.bg, fontWeight: 800, cursor: "pointer", textAlign: "center" as any, fontSize: 12, transition: "all 0.2s" },
-
-  // Múltiplas
-  multiplaCard: { background: C.surfaceRaised, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 },
-  multiplaHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" as any },
-  multiplaLegs: { display: "flex", flexDirection: "column" as any, gap: 4 },
-  multiplaLeg: { display: "flex", flexDirection: "column" as any, padding: "4px 8px", background: C.surface2, borderRadius: 6 },
-  multiplaLegNome: { fontSize: 11, fontWeight: 700, color: C.text },
-  multiplaLegDetalhe: { fontSize: 10, color: C.textMuted },
-
   // Apostas
+  filtrosRow: { display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 10, flexWrap: "wrap" as any },
+  filtroGroup: { display: "flex", flexDirection: "column" as any, gap: 4 },
+  filtroBtn: { padding: "4px 8px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textMuted, fontSize: 10, fontWeight: 600, cursor: "pointer" },
+  filtroBtnActive: { background: C.goldBg, border: `1px solid ${C.gold}`, color: C.gold },
   dashGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 },
   dashCard: { background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 8px", textAlign: "center" as any },
   dashValue: { fontSize: 14, fontWeight: 800, color: C.gold, marginBottom: 2 },
@@ -1575,4 +1259,8 @@ const styles: Record<string, React.CSSProperties> = {
   emptyIcon: { fontSize: 32, marginBottom: 12 },
   emptyTitle: { fontSize: 15, fontWeight: 700, color: C.gold, marginBottom: 6 },
   emptySub: { fontSize: 12, color: C.textMuted, lineHeight: 1.6 },
+
+  // Player info (usado em jogadores e ranking)
+  playerMeta: { display: "flex", gap: 6, alignItems: "center" },
+  playerVs: { fontSize: 10, color: C.textMuted },
 }
